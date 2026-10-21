@@ -187,6 +187,22 @@ for (const p of PAGES) {
     await expect(panel).toHaveAttribute("data-open", "true");
     await expect(fig.locator(".np-item[data-on='true'] .np-text")).toContainText(p.tip);
     expect(await still()).toEqual(at0);
+    // The box hugs the entry that shows, while the slot keeps the tallest entry's height: the shortest
+    // entry sits in a box shorter than the slot.
+    const sizes = () =>
+      fig.evaluate((f) => {
+        const hgt = (el: Element | null) => el?.getBoundingClientRect().height ?? 0;
+        const items = [...f.querySelectorAll<HTMLElement>(".np-item")];
+        const short = items.reduce((a, b) => (hgt(b) < hgt(a) ? b : a));
+        return { box: hgt(f.querySelector(".np-box")), item: hgt(f.querySelector(".np-item[data-on='true']")), slot: hgt(f.querySelector(".np-slot")), shortest: short.dataset.for ?? "", spread: Math.max(...items.map(hgt)) - hgt(short) };
+      });
+    await expect.poll(async () => { const z = await sizes(); return Math.abs(z.box - z.item) < 2; }).toBe(true);
+    const short = (await sizes()).shortest;
+    await focus(short);
+    // Where every entry is as tall as the next (the vLLM drawer's, two lines each), the box is the slot.
+    await expect.poll(async () => { const z = await sizes(); return Math.abs(z.box - z.item) < 2 && (z.spread < 10 || z.box < z.slot - 10); }).toBe(true);
+    expect(await still()).toEqual(at0);
+    await focus(id);
     const other = await fig.locator("svg.wd-map:visible [data-node]").evaluateAll((ns, me) => ns.map((n) => n.getAttribute("data-node")).find((n) => n !== me) as string, id);
     if (test.info().project.name === "desktop") {
       await node(other).locator("rect").hover();

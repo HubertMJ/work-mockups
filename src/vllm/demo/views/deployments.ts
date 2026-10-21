@@ -1,14 +1,15 @@
 // The Deployments tab: what runs where, the VRAM budget per card, recent events and every deployment
 // as a card with its actions. Each part redraws only from its own slice of the State.
 
-import { h, replace, setText } from "../../../lib/dom";
+import { h, setText } from "../../../lib/dom";
 import * as A from "../actions";
-import { admitOnCard } from "../admission";
-import { budget, CARD_GIB, CEILING, concurrency, int, isResident, isStale, planBudget, slug, stamp, clock, util, utilAt } from "../model";
+import { changedFlags, type Draft } from "../config";
+import { budget, CARD_GIB, cardsOf, CEILING, concurrency, cardsText, int, isResident, isStale, onCard, slug, stamp, clock, util } from "../model";
 import { budgetOn, usedGiB } from "../sim";
 import type { Deployment, Level, State } from "../types";
 import { badge, btn, field, icon, openDialog, region, select, type Ctx } from "../ui";
 import { showConflict, statusBadge } from "./common";
+import { configForm } from "./config-form";
 
 export function mountDeployments(panel: HTMLElement, ctx: Ctx): void {
   const active = h("div", { class: "vd-active__list" });
@@ -31,7 +32,7 @@ export function mountDeployments(panel: HTMLElement, ctx: Ctx): void {
     const live = deps.filter(isResident);
     if (!live.length) return h("p", { class: "vd-empty" }, "Nothing runs. Start a deployment below, or send it a prompt in the Playground.");
     return live.map((d) =>
-      h("div", { class: "vd-active__row" }, h("code", { class: "vd-alias" }, d.alias), statusBadge(d.status), h("span", { class: "vd-kv" }, h("span", {}, "GPU"), String(d.gpu)), h("span", { class: "vd-kv" }, h("span", {}, "Min util"), minUtil(d))),
+      h("div", { class: "vd-active__row" }, h("code", { class: "vd-alias" }, d.alias), statusBadge(d.status), h("span", { class: "vd-kv" }, h("span", {}, "GPU"), cardsOf(d.cfg) > 1 ? `${d.gpu}–${d.gpu + cardsOf(d.cfg) - 1}` : String(d.gpu)), h("span", { class: "vd-kv" }, h("span", {}, "Min util"), minUtil(d))),
     );
   });
 
@@ -92,9 +93,9 @@ function gpuTile(ctx: Ctx, i: number): HTMLElement {
   };
   patch(ctx.store.get());
   ctx.store.subscribe(patch);
-  region(lower, ctx.store, (s) => `${s.gpus[i].blocked}|${s.deps.filter((d) => d.gpu === i && isResident(d)).map((d) => d.alias).join(",")}`, (_, s) => {
+  region(lower, ctx.store, (s) => `${s.gpus[i].blocked}|${s.deps.filter((d) => onCard(d, i) && isResident(d)).map((d) => d.alias).join(",")}`, (_, s) => {
     const g = s.gpus[i];
-    const residents = s.deps.filter((d) => d.gpu === i && isResident(d));
+    const residents = s.deps.filter((d) => onCard(d, i) && isResident(d));
     return [
       g.blocked
         ? h("div", { class: "vd-alert vd-alert--bad" }, h("p", {}, `New loads blocked: ${g.blocked}`), btn("Allow loads again", () => ctx.act((x) => A.unblock(x, i)), { k: `unblock:${i}` }))
@@ -138,11 +139,25 @@ function message(ctx: Ctx, d: Deployment): HTMLElement {
   if (d.refused) return h("div", { class: "vd-msg vd-alert vd-alert--warn" }, h("p", {}, d.refused), dismiss(ctx, d, "refusal"));
   const last = d.log.at(-1);
   if (d.phase && last) return h("div", { class: "vd-msg vd-msg--log" }, h("span", { class: "vd-spin", "aria-hidden": "true" }), h("code", {}, last.text));
-  if (d.pending) return h("div", { class: "vd-msg vd-msg--note" }, `Restart to apply: max length ${d.maxLen} → ${d.pending.maxLen}, max seqs ${d.maxSeqs} → ${d.pending.maxSeqs}.`);
+  if (d.pending) return h("div", { class: "vd-msg vd-msg--note" }, `Restart to apply: ${pendingText(ctx, d)}.`);
   if (isStale(d)) return h("div", { class: "vd-msg vd-msg--note" }, `Profile stale: max length changed ${d.profileLen} → ${d.maxLen}. Admitted on ${util(budget(d))} until a start measures it.`);
   if (d.source === "estimate") return h("div", { class: "vd-msg vd-msg--note" }, `Never measured: admitted on an estimate of ${util(d.minUtil)} until the engine reports its profile.`);
   if (last) return h("div", { class: "vd-msg vd-msg--log" }, h("code", {}, `${clock(last.t)} ${last.text}`));
   return h("div", { class: "vd-msg" });
+}
+
+const draftOf = (d: Deployment, p = d.pending): Draft => ({ alias: d.alias, repo: d.model, gpu: d.gpu, maxLen: p?.maxLen ?? d.maxLen, maxSeqs: p?.maxSeqs ?? d.maxSeqs, lazy: d.lazy, extraAliases: [], cfg: p?.cfg ?? d.cfg });
+
+/** What a restart would change, flag by flag. */
+function pendingText(ctx: Ctx, d: Deployment): string {
+  const m = ctx.store.get().catalog.find((x) => x.repo === d.model);
+  const flags = changedFlags(draftOf(d, null), draftOf(d), m).filter((f) => f !== "--max-model-len" && f !== "--max-num-seqs");
+  const parts = [
+    d.pending && d.pending.maxLen !== d.maxLen ? `max length ${d.maxLen} → ${d.pending.maxLen}` : "",
+    d.pending && d.pending.maxSeqs !== d.maxSeqs ? `max seqs ${d.maxSeqs} → ${d.pending.maxSeqs}` : "",
+    flags.length ? `${flags.join(", ")}` : "",
+  ].filter(Boolean);
+  return parts.join("; ") || "new settings";
 }
 
 function dismiss(ctx: Ctx, d: Deployment, what: string): HTMLElement {
@@ -182,10 +197,16 @@ function card(ctx: Ctx, d: Deployment): HTMLElement {
       "div",
       { class: "vd-chips" },
       statusBadge(d.status),
-      badge(`GPU ${d.gpu}`, "outline"),
+      badge(cardsText(d), "outline"),
+      cardsOf(d.cfg) > 1 ? badge(`TP ${d.cfg.tp}${d.cfg.pp > 1 ? ` · PP ${d.cfg.pp}` : ""}`, "outline") : null,
       d.pinned ? badge("Pinned") : null,
       d.lazy ? badge("lazy") : null,
       d.kind === "embed" ? badge("embeddings", "accent") : null,
+      d.cfg.kvDtype === "fp8" ? badge("fp8 KV") : null,
+      d.cfg.quant !== "none" ? badge(d.cfg.quant) : null,
+      d.cfg.spec.method !== "none" ? badge(`spec: ${d.cfg.spec.method}`) : null,
+      d.cfg.lora.on ? badge("LoRA") : null,
+      d.cfg.memUtil !== null ? badge(`util ${util(d.cfg.memUtil)}`, "warn") : null,
       d.pending ? badge("Restart to apply", "warn") : null,
       d.extraAliases.map((x) => h("code", { class: "vd-chip" }, x)),
     ),
@@ -224,40 +245,28 @@ function logsDialog(ctx: Ctx, alias: string): void {
   level.addEventListener("change", view.redraw);
 }
 
-const LENS = [4096, 8192, 16384, 32768, 65536, 131072];
-
 function editDialog(ctx: Ctx, alias: string): void {
-  const s = ctx.store.get();
-  const d = s.deps.find((x) => x.alias === alias);
+  const d = ctx.store.get().deps.find((x) => x.alias === alias);
   if (!d) return;
-  const max = s.catalog.find((m) => m.repo === d.model)?.maxCtx ?? 131072;
-  const len = select(LENS.filter((n) => n <= max).map((n) => [String(n), String(n)]), String(d.pending?.maxLen ?? d.maxLen));
-  const seqs = h("input", { class: "vd-input", type: "number", min: "1", max: "1024", step: "1", value: String(d.pending?.maxSeqs ?? d.maxSeqs), inputmode: "numeric" });
-  const lazy = h("input", { type: "checkbox", checked: d.lazy });
-  const hint = h("p", { class: "vd-hint" });
+  const form = configForm(ctx, { mode: "edit", dep: d });
   const err = h("p", { class: "vd-form-error", role: "alert" });
-  const upd = (): void => {
-    const floor = utilAt(d.minUtil, d.profileLen, Number(len.value));
-    const live = d.status === "Running" || d.status === "Starting";
-    setText(hint, `Memory floor at this length: about ${util(floor)} of GPU ${d.gpu} (now ${util(planBudget(d))}). ${live ? "A running engine picks changes up on restart." : "Applied at the next start, which measures it."}`);
-  };
-  len.addEventListener("change", upd);
-  upd();
   const dlg = openDialog(ctx.host, {
     title: `Edit ${alias}`,
-    body: [
-      h("div", { class: "vd-form" }, field("Max length (tokens)", len), field("Max seqs", seqs), h("label", { class: "vd-check" }, lazy, " Lazy: started on demand, evictable while idle")),
-      hint,
-      err,
-    ],
+    wide: true,
+    body: [form.el, err],
     actions: [
       btn("Cancel", () => dlg.close()),
       btn("Save", () => {
-        const r = ctx.act((x) => A.edit(x, alias, { maxLen: Number(len.value), maxSeqs: Number(seqs.value), lazy: lazy.checked }));
-        if (r.error) return setText(err, r.error);
+        const x = form.read();
+        const r = ctx.act((s) => A.edit(s, alias, { maxLen: x.maxLen, maxSeqs: x.maxSeqs, lazy: x.lazy, cfg: x.cfg, extraAliases: x.extraAliases, gpu: x.gpu }));
+        if (r.error) {
+          setText(err, r.error);
+          if (r.problems) form.show(r.problems);
+          return;
+        }
         dlg.close();
         if (r.conflict) showConflict(ctx, r.conflict);
-      }, { kind: "primary" }),
+      }, { kind: "primary", k: "edit-save" }),
     ],
   });
 }
@@ -279,60 +288,28 @@ function confirmDelete(ctx: Ctx, alias: string): void {
 }
 
 function newDeployment(ctx: Ctx): void {
-  const s0 = ctx.store.get();
-  const cached = s0.catalog.filter((m) => m.cached);
-  const model = select(cached.map((m) => [m.repo, m.repo]), "Qwen/Qwen3-14B");
-  const alias = h("input", { class: "vd-input", autocomplete: "off", spellcheck: "false", maxlength: "40" });
-  const gpu = select(s0.gpus.map((g) => [String(g.index), `GPU ${g.index}${g.blocked ? " · blocked" : ""}`]), "3");
-  const len = select([], "32768");
-  const seqs = h("input", { class: "vd-input", type: "number", min: "1", max: "1024", value: "32", inputmode: "numeric" });
-  const lazy = h("input", { type: "checkbox", checked: true });
-  const info = h("dl", { class: "vd-info" });
-  const fit = h("div", { class: "vd-fit", "aria-live": "polite" });
+  const form = configForm(ctx, { mode: "new" });
   const err = h("p", { class: "vd-form-error", role: "alert" });
-  let typed = false;
-  alias.addEventListener("input", () => (typed = true));
-  const upd = (): void => {
-    const s = ctx.store.get();
-    const m = cached.find((x) => x.repo === model.value) ?? cached[0];
-    const keep = Number(len.value) || 32768;
-    replace(len, LENS.filter((n) => n <= m.maxCtx).map((n) => h("option", { value: String(n) }, String(n))));
-    len.value = String(LENS.filter((n) => n <= m.maxCtx).reduce((a, n) => (n <= keep ? n : a), 4096));
-    if (!typed) alias.value = slug(m.repo.split("/").pop() ?? m.repo).slice(0, 40);
-    const est = A.estimate(m, Number(len.value));
-    replace(info,
-      h("dt", {}, "Architecture"), h("dd", {}, m.arch),
-      h("dt", {}, "Parameters"), h("dd", {}, m.params),
-      h("dt", {}, "Weights (est.)"), h("dd", {}, `${m.weightsGiB.toFixed(1)} GiB`),
-      h("dt", {}, "Max context"), h("dd", {}, int(m.maxCtx)),
-      h("dt", {}, "Floor (est.)"), h("dd", {}, `${util(est)} of a card · ${(est * CARD_GIB).toFixed(1)} GiB`),
-    );
-    const g = Number(gpu.value);
-    const a = admitOnCard(s, g, est);
-    const now = budgetOn(s, g);
-    if (a.ok && !a.evict.length) replace(fit, h("p", { class: "vd-good" }, `Fits GPU ${g} now: ${util(now)} + ${util(est)} = ${util(now + est)} of ${util(CEILING)}.`));
-    else if (a.ok) replace(fit, h("p", { class: "vd-warn" }, `Fits GPU ${g} after evicting ${a.evict.join(", ")} (idle, lazy).`));
-    else replace(fit, h("p", { class: "vd-bad" }, `Does not fit GPU ${g} now: ${a.reason}. ${a.detail.replace(" Nothing was stopped.", "")} It is created stopped either way.`));
-  };
-  for (const c of [model, gpu, len]) c.addEventListener("change", upd);
-  upd();
   const dlg = openDialog(ctx.host, {
     title: "New deployment",
     wide: true,
     body: [
-      h("p", { class: "vd-faint" }, "Pick a model from the local cache. Nothing starts until you press Start or a request names it."),
-      h("div", { class: "vd-form vd-form--2" }, field("Model (cached)", model), field("Alias", alias), field("GPU", gpu), field("Max length (tokens)", len), field("Max seqs", seqs), h("label", { class: "vd-check" }, lazy, " Lazy: started on demand, evictable while idle")),
-      info,
-      fit,
+      h("p", { class: "vd-faint" }, "Pick a model from the local cache and set how its engine runs. Nothing starts until you press Start or a request names it."),
+      form.el,
       err,
     ],
     actions: [
       btn("Cancel", () => dlg.close()),
       btn("Create", () => {
-        const r = ctx.act((x) => A.create(x, { alias: alias.value, repo: model.value, gpu: Number(gpu.value), maxLen: Number(len.value), maxSeqs: Number(seqs.value), lazy: lazy.checked }));
-        if (r.error) return setText(err, r.error);
+        const x = form.read();
+        const r = ctx.act((s) => A.create(s, { alias: x.alias, repo: x.repo, gpu: x.gpu, maxLen: x.maxLen, maxSeqs: x.maxSeqs, lazy: x.lazy, cfg: x.cfg, extraAliases: x.extraAliases }));
+        if (r.error) {
+          setText(err, r.error);
+          if (r.problems) form.show(r.problems);
+          return;
+        }
         dlg.close();
-      }, { kind: "primary" }),
+      }, { kind: "primary", k: "create" }),
     ],
   });
 }

@@ -1,6 +1,7 @@
 // Constants and small pure helpers shared by the planner, admission and the views.
 
-import type { Deployment, State } from "./types";
+import { draftGiB } from "./catalog";
+import type { Deployment, EngineConfig, ModelMem, State } from "./types";
 
 export const CARD_GIB = 96;
 export const CEILING = 0.95;
@@ -34,17 +35,56 @@ export const round2 = (n: number): number => Math.round(n * 100) / 100;
 /** The floor at another max length: about 0.002 of the card per 1k tokens of context. */
 export const utilAt = (util: number, fromLen: number, toLen: number): number => round2(util + ((toLen - fromLen) / 1024) * 0.002);
 
-/** True when the profile was taken at another max length than the one configured now. */
-export const isStale = (d: Deployment): boolean => d.source !== "estimate" && d.profileLen !== d.maxLen;
+/** Cards a deployment holds: tensor × pipeline parallel of them, from its anchor card up. */
+export const cardsOf = (c: EngineConfig): number => c.tp * c.pp;
+export const cards = (d: Deployment): number[] => Array.from({ length: cardsOf(d.cfg) }, (_, i) => d.gpu + i);
+export const onCard = (d: Deployment, g: number): boolean => g >= d.gpu && g < d.gpu + cardsOf(d.cfg);
+export const cardsText = (d: Deployment): string => (cardsOf(d.cfg) > 1 ? `GPU ${d.gpu}–${d.gpu + cardsOf(d.cfg) - 1}` : `GPU ${d.gpu}`);
 
-/** What admission and the planner count for a deployment: its floor, re-estimated when stale. */
+/**
+ * Memory one card of a deployment holds, GiB, as the estimate sees it: its share of the weights
+ * (re-quantized, minus what is offloaded to the host), the CUDA graphs, adapters, a draft model and the
+ * KV cache for one request at full length. With the defaults this is the formula new deployments always used.
+ */
+export function floorGiB(mem: ModelMem, c: EngineConfig, maxLen: number): number {
+  const n = cardsOf(c);
+  const src = mem.precision === "fp8" ? 1 : 2;
+  const dst = c.quant === "fp8" ? Math.min(src, 1) : c.quant === "bitsandbytes" ? 0.56 : src;
+  const weights = Math.max(0, (mem.weightsGiB * (dst / src) * 1.05) / n - c.offloadGiB);
+  const kv = ((maxLen / 1024) * mem.kvPerK * (c.kvDtype === "fp8" ? 0.5 : 1)) / n;
+  const graphs = c.eager ? 0.6 : 1.5;
+  const lora = c.lora.on ? c.lora.max * c.lora.rank * 0.004 : 0;
+  const draft = c.spec.method === "draft" ? draftGiB(c.spec.draft) * 1.05 + 0.4 : 0;
+  return weights + kv + graphs + lora + draft;
+}
+
+/** The settings that change what a card holds; any other edit leaves a measured profile valid. */
+const memKey = (c: EngineConfig): string =>
+  [c.tp, c.pp, c.kvDtype, c.quant, c.eager, c.offloadGiB, c.lora.on && `${c.lora.max}x${c.lora.rank}`, c.spec.method === "draft" && c.spec.draft].join("|");
+export const sameMem = (a: EngineConfig, b: EngineConfig): boolean => memKey(a) === memKey(b);
+
+/** True when the profile was taken at another max length, or other memory settings, than the ones configured now. */
+export const isStale = (d: Deployment): boolean => d.source !== "estimate" && (d.profileLen !== d.maxLen || !sameMem(d.profileCfg, d.cfg));
+
+/**
+ * A deployment's floor under settings `c` and length `maxLen`: an explicit --gpu-memory-utilization wins;
+ * otherwise the measured (or estimated) floor, moved by the length change and by what the estimate says
+ * the other settings add or save.
+ */
+export function floorAt(d: Deployment, c: EngineConfig, maxLen: number): number {
+  if (c.memUtil !== null) return c.memUtil;
+  const delta = sameMem(c, d.profileCfg) ? 0 : (floorGiB(d.mem, c, maxLen) - floorGiB(d.mem, d.profileCfg, maxLen)) / CARD_GIB;
+  return round2(Math.max(0.02, utilAt(d.minUtil, d.profileLen, maxLen) + delta));
+}
+
+/** What admission and the planner count for a deployment, on each of its cards: its floor, re-estimated when stale. */
 export function budget(d: Deployment): number {
-  return isStale(d) ? utilAt(d.minUtil, d.profileLen, d.maxLen) : d.minUtil;
+  return floorAt(d, d.cfg, d.maxLen);
 }
 
 /** The budget a future window needs: edits a running engine has not applied yet count already. */
 export function planBudget(d: Deployment): number {
-  return d.pending ? utilAt(d.minUtil, d.profileLen, d.pending.maxLen) : budget(d);
+  return d.pending ? floorAt(d, d.pending.cfg, d.pending.maxLen) : budget(d);
 }
 
 /** Holding memory on its card: running, or on its way up or down. */

@@ -3,38 +3,49 @@
 // what it did not give is invented in the same style. Everything comes from one seed, so the page
 // looks the same on every load.
 
+import { CATALOG } from "./catalog";
+import { defaultConfig, memOf } from "./config";
+import { COARSE, COARSE_EVERY, emptyTelemetry, HISTORY, readings, record, recordCoarse } from "./metrics";
 import { DAY, GIB, HOUR, MIB, rng, SEED_NOW, slug, WEEK0 } from "./model";
 import { plan } from "./planner";
-import { HISTORY, pushLog, sample, startupLog } from "./sim";
-import type { CachedModel, Deployment, Download, Event, Req, Reservation, State } from "./types";
+import { pushLog, startupLog } from "./sim";
+import type { Deployment, Download, EngineConfig, Event, Req, Reservation, State } from "./types";
+
+export { CATALOG };
 
 const at = (day: number, h: number, m = 0): number => WEEK0 + day * DAY + h * HOUR + m * 60_000;
 const ago = (min: number): number => SEED_NOW - min * 60_000;
 
-type Base = Omit<Deployment, "status" | "pinned" | "lazy" | "drift" | "pending" | "extraAliases" | "error" | "refused" | "phase" | "log" | "kvLen" | "profileLen"> &
-  Partial<Deployment>;
-const mk = (d: Base): Deployment => ({
-  status: "Stopped", pinned: false, lazy: false, drift: 0, pending: null, extraAliases: [], error: null, refused: null, phase: null, log: [],
-  kvLen: d.maxLen, profileLen: d.maxLen, ...d,
-});
+type Base = Omit<Deployment, "status" | "pinned" | "lazy" | "drift" | "pending" | "extraAliases" | "error" | "refused" | "phase" | "log" | "kvLen" | "profileLen" | "cfg" | "profileCfg" | "mem"> &
+  Partial<Omit<Deployment, "cfg">> & { cfg?: Partial<EngineConfig> };
+const mk = ({ cfg: over, ...d }: Base): Deployment => {
+  const m = CATALOG.find((x) => x.repo === d.model);
+  const cfg: EngineConfig = { ...defaultConfig(), ...(d.kind === "embed" ? { prefixCaching: false, chunkedPrefill: false } : {}), ...over };
+  return {
+    status: "Stopped", pinned: false, lazy: false, drift: 0, pending: null, extraAliases: [], error: null, refused: null, phase: null, log: [],
+    kvLen: d.maxLen, profileLen: d.maxLen, cfg, profileCfg: cfg, mem: m ? memOf(m) : { weightsGiB: 15, kvPerK: 0.13, precision: "bf16" }, ...d,
+  };
+};
 
 function deployments(): Deployment[] {
   const list = [
     mk({ alias: "qwen3-32b", model: "Qwen/Qwen3-32B", gpu: 0, kind: "generate", status: "Running", pinned: true, minUtil: 0.74, source: "engine-log",
-      maxLen: 32768, maxSeqs: 64, kvTokens: 410_000, extraAliases: ["chat-default"], lastUsed: ago(0.2), load: 0.78 }),
+      maxLen: 32768, maxSeqs: 64, kvTokens: 410_000, extraAliases: ["chat-default"], lastUsed: ago(0.2), load: 0.78,
+      cfg: { thinkParser: "qwen3", toolParser: "hermes", autoTools: true, maxBatched: 8192, chatKwargs: '{"enable_thinking": false}' } }),
     mk({ alias: "llama-3.3-70b-fp8", model: "meta-llama/Llama-3.3-70B-Instruct-FP8", gpu: 1, kind: "generate", status: "Running", minUtil: 0.91,
-      source: "engine-log", maxLen: 16384, maxSeqs: 32, kvTokens: 96_000, lastUsed: ago(0.5), load: 0.41 }),
+      source: "engine-log", maxLen: 16384, maxSeqs: 32, kvTokens: 96_000, lastUsed: ago(0.5), load: 0.41,
+      cfg: { toolParser: "llama3_json", autoTools: true, kvDtype: "fp8", env: [["VLLM_LOGGING_LEVEL", "INFO"]] } }),
     mk({ alias: "embed-8b", model: "Qwen/Qwen3-Embedding-8B", gpu: 2, kind: "embed", status: "Running", minUtil: 0.23, source: "nvidia-smi",
       maxLen: 8192, maxSeqs: 128, kvTokens: null, lastUsed: ago(0.4), load: 0.12 }),
     mk({ alias: "model-a-moe", model: "model-a (MoE 30B-A3B)", gpu: 3, kind: "generate", lazy: true, minUtil: 0.66, source: "estimate", drift: 0.04,
-      maxLen: 65536, maxSeqs: 48, kvTokens: null, lastUsed: ago(300), load: 0.55 }),
+      maxLen: 65536, maxSeqs: 48, kvTokens: null, lastUsed: ago(300), load: 0.55, cfg: { remoteCode: true, idleMin: 30 } }),
     mk({ alias: "model-b", model: "model-b-14b", gpu: 3, kind: "generate", lazy: true, minUtil: 0.38, source: "engine-log",
       maxLen: 32768, maxSeqs: 32, kvTokens: 212_000, lastUsed: ago(24), load: 0.35 }),
     mk({ alias: "model-c", model: "model-c-8b", gpu: 2, kind: "generate", status: "Error", lazy: true, minUtil: 0.31, source: "engine-log",
       profileLen: 16384, kvLen: 16384, maxLen: 32768, maxSeqs: 16, kvTokens: 148_000, lastUsed: ago(130), load: 0.3,
       error: "start exceeded cold-start ceiling (300 s), container removed" }),
     mk({ alias: "qwen2.5-7b", model: "Qwen/Qwen2.5-7B-Instruct", gpu: 0, kind: "generate", lazy: true, minUtil: 0.3, source: "engine-log",
-      maxLen: 32768, maxSeqs: 32, kvTokens: 380_000, lastUsed: ago(900), load: 0.3 }),
+      maxLen: 32768, maxSeqs: 32, kvTokens: 380_000, lastUsed: ago(900), load: 0.3, cfg: { toolParser: "hermes", autoTools: true } }),
   ];
   const log = (d: Deployment, lines: [number, Deployment["log"][number]["level"], string][]): Deployment =>
     lines.reduce((x, [t, level, text]) => pushLog(x, { t, level, text }), d);
@@ -88,21 +99,6 @@ function reservations(): Reservation[] {
   ];
   return list.map(([name, alias, start, end], i) => ({ id: `s${i + 1}`, name, alias, start, end, created: i + 1, status: "Scheduled", reason: null }));
 }
-
-export const CATALOG: CachedModel[] = [
-  { repo: "Qwen/Qwen3-32B", arch: "Qwen3ForCausalLM, dense", params: "32.8B", weightsGiB: 61.0, maxCtx: 40960, kvPerK: 0.25, kind: "generate", cached: true },
-  { repo: "meta-llama/Llama-3.3-70B-Instruct-FP8", arch: "LlamaForCausalLM, dense, FP8", params: "70.6B", weightsGiB: 68.0, maxCtx: 131072, kvPerK: 0.31, kind: "generate", cached: true },
-  { repo: "Qwen/Qwen3-Embedding-8B", arch: "Qwen3Model, embedding", params: "7.6B", weightsGiB: 15.1, maxCtx: 32768, kvPerK: 0.14, kind: "embed", cached: true },
-  { repo: "Qwen/Qwen2.5-7B-Instruct", arch: "Qwen2ForCausalLM, dense", params: "7.6B", weightsGiB: 14.2, maxCtx: 32768, kvPerK: 0.055, kind: "generate", cached: true },
-  { repo: "Qwen/Qwen3-14B", arch: "Qwen3ForCausalLM, dense", params: "14.8B", weightsGiB: 27.5, maxCtx: 40960, kvPerK: 0.16, kind: "generate", cached: true },
-  { repo: "Qwen/Qwen3-8B", arch: "Qwen3ForCausalLM, dense", params: "8.2B", weightsGiB: 15.3, maxCtx: 40960, kvPerK: 0.14, kind: "generate", cached: true },
-  { repo: "model-a (MoE 30B-A3B)", arch: "MoE, 3B active", params: "30.5B", weightsGiB: 56.9, maxCtx: 65536, kvPerK: 0.09, kind: "generate", cached: true },
-  { repo: "model-b-14b", arch: "dense", params: "14.0B", weightsGiB: 26.1, maxCtx: 32768, kvPerK: 0.16, kind: "generate", cached: true },
-  { repo: "model-c-8b", arch: "dense", params: "8.0B", weightsGiB: 15.0, maxCtx: 32768, kvPerK: 0.13, kind: "generate", cached: true },
-  { repo: "Qwen/Qwen3-30B-A3B-Instruct-2507", arch: "Qwen3MoeForCausalLM, MoE, 3.3B active", params: "30.5B", weightsGiB: 56.9, maxCtx: 262144, kvPerK: 0.09, kind: "generate", cached: false },
-  { repo: "meta-llama/Llama-3.1-8B-Instruct", arch: "LlamaForCausalLM, dense", params: "8.0B", weightsGiB: 15.0, maxCtx: 131072, kvPerK: 0.125, kind: "generate", cached: false },
-  { repo: "meta-llama/Llama-3.3-70B-Instruct", arch: "LlamaForCausalLM, dense", params: "70.6B", weightsGiB: 131.4, maxCtx: 131072, kvPerK: 0.31, kind: "generate", cached: false },
-];
 
 const DOWNLOADS: Download[] = [
   { id: "d-1", repo: "Qwen/Qwen3-30B-A3B-Instruct-2507", state: "running", bytes: 38.2 * GIB, total: 56.9 * GIB, finalBytes: 56.9 * GIB, speed: 182 * MIB, error: null },
@@ -162,6 +158,33 @@ function background(): Req[] {
   }).reverse();
 }
 
+/** Who ran in the hour before "now" and is down at load: model-b, until it went idle 24 minutes ago. */
+const PAST_RUNS: [string, number, number][] = [["model-b", ago(85), ago(24)]];
+
+/** The last hour of telemetry, played from one seed: 15 s points up to three minutes ago, then 1 s samples. */
+function history(s0: State): State["telemetry"] {
+  const r = rng(96);
+  const at = (t: number): State => {
+    const deps = s0.deps.map((d) => {
+      const run = PAST_RUNS.find(([a, from, to]) => a === d.alias && t >= from && t < to);
+      return run ? { ...d, status: "Running" as const } : d;
+    });
+    return { ...s0, now: t, deps };
+  };
+  const t = emptyTelemetry(s0.gpus.length, SEED_NOW - HISTORY * 1000);
+  const coarse = COARSE - HISTORY / COARSE_EVERY;
+  for (let i = 0; i < coarse; i++) {
+    const when = SEED_NOW - (HISTORY + (coarse - i) * COARSE_EVERY) * 1000;
+    recordCoarse(t, readings(at(when), t, when, r), s0.deps);
+  }
+  let out = t;
+  for (let i = HISTORY - 1; i >= 0; i--) {
+    const when = SEED_NOW - i * 1000;
+    out = record(out, readings(at(when), out, when, r), when, s0.deps);
+  }
+  return out;
+}
+
 export function seed(): State {
   const s0: State = {
     now: SEED_NOW,
@@ -172,27 +195,11 @@ export function seed(): State {
     background: background(),
     downloads: DOWNLOADS,
     catalog: CATALOG,
-    telemetry: { at: SEED_NOW, util: [[], [], [], []], vram: [[], [], [], []], temp: [[], [], [], []] },
+    telemetry: emptyTelemetry(4, SEED_NOW),
     stream: null,
     notice: null,
     events: EVENTS,
     seq: 100,
   };
-  // The last three minutes of telemetry, played from the same seed.
-  const r = rng(96);
-  const t = s0.telemetry;
-  const prev = [78, 41, 12, 0];
-  const temp = [64, 55, 41, 36];
-  for (let i = 0; i < HISTORY; i++) {
-    for (const g of s0.gpus) {
-      const [u, v, c] = sample(s0, g.index, prev[g.index], temp[g.index], r);
-      prev[g.index] = u;
-      temp[g.index] = c;
-      t.util[g.index].push(u);
-      t.vram[g.index].push(v);
-      t.temp[g.index].push(c);
-    }
-  }
-  return { ...s0, reservations: plan(s0) };
+  return { ...s0, telemetry: history(s0), reservations: plan(s0) };
 }
-

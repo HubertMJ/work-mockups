@@ -189,7 +189,7 @@ describe("reservation planner", () => {
     const r = edit(s, "llama-3.3-70b-fp8", { maxLen: 65536, maxSeqs: 32, lazy: false });
     expect(r.conflict?.item.name).toBe("load-test-1");
     const ok = edit(s, "qwen3-32b", { maxLen: 32768, maxSeqs: 48, lazy: false });
-    expect(dep(ok.state, "qwen3-32b")?.pending).toEqual({ maxLen: 32768, maxSeqs: 48 });
+    expect(dep(ok.state, "qwen3-32b")?.pending).toMatchObject({ maxLen: 32768, maxSeqs: 48 });
   });
 });
 

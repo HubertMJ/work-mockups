@@ -162,3 +162,58 @@ test("in ASCII mode the SVG's dots stay off: the character drawing runs its own 
   await expect(page.locator("pre.ascii-dg:not([hidden])")).toHaveCount(1);
   expect(await page.locator(".wd-dot").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length)).toBe(0);
 });
+
+// In the normal look a box's details slide out under its drawing (the node panel, src/node-panel), as
+// ASCII mode's popups do beside the box. The slot is reserved from the start: nothing moves.
+for (const p of PAGES) {
+  test(`the ${p.id} drawing shows a box's details under it, and nothing moves`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    await page.goto(p.path);
+    if (p.open) await openAbout(page);
+    const fig = page.locator(`figure:has(svg.wd-map[data-diagram="${p.id}"])`);
+    const panel = fig.locator(".np-panel");
+    const node = (id: string) => fig.locator(`svg.wd-map:visible [data-node="${id}"]`);
+    const still = () => page.evaluate(() => [document.documentElement.scrollHeight, Math.round(scrollY), document.querySelector(".vd-drawer .vd-dialog__body")?.scrollHeight ?? 0, Math.round(document.querySelector(".vd-drawer .vd-dialog__body")?.scrollTop ?? 0)]);
+    // Focus as Tab would, without the browser scrolling the box into view: the panel is what is measured.
+    const focus = (id: string) => node(id).evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
+    const id = (await node(p.first.toLowerCase()).count()) ? p.first.toLowerCase() : ({ Webhook: "webhook", Merger: "merger", Gateway: "gateway" } as Record<string, string>)[p.first];
+    const at0 = await still();
+    await expect(panel).toHaveAttribute("data-open", "false");
+    await expect(node(id)).toHaveAttribute("role", "button");
+    await focus(id);
+    await expect(panel).toHaveAttribute("data-open", "true");
+    await expect(fig.locator(".np-item[data-on='true'] .np-text")).toContainText(p.tip);
+    expect(await still()).toEqual(at0);
+    const other = await fig.locator("svg.wd-map:visible [data-node]").evaluateAll((ns, me) => ns.map((n) => n.getAttribute("data-node")).find((n) => n !== me) as string, id);
+    if (test.info().project.name === "desktop") {
+      await node(other).locator("rect").hover();
+    } else {
+      await node(other).locator("rect").tap();
+    }
+    await expect(fig.locator(".np-item[data-on='true']")).toHaveAttribute("data-for", other);
+    // Heights only here: Playwright scrolls the other box into view before it points at it or taps it.
+    const at = await still();
+    expect([at[0], at[2]]).toEqual([at0[0], at0[2]]);
+    const at1 = await still();
+    // Escape closes the panel only: in the vLLM page's drawer, the drawer stays open.
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveAttribute("data-open", "false");
+    if (p.open) await expect(page.getByRole("dialog", { name: "About this mock-up" })).toBeVisible();
+    expect(await still()).toEqual(at1);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("the node panel shows at once with reduced motion, and is not there in ASCII mode", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/work/flota/");
+  await page.locator('svg.wd-map:visible [data-node="merger"]').evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
+  await expect(page.locator(".np-panel")).toHaveAttribute("data-open", "true");
+  expect(await page.locator(".np-panel").evaluate((p) => getComputedStyle(p).transitionDuration.split(",").every((d) => parseFloat(d) === 0))).toBe(true);
+  await page.goto("/work/flota/?ascii=1");
+  await expect(page.locator("html")).toHaveClass(/ascii/);
+  expect(await page.locator(".np-slot").evaluate((s) => getComputedStyle(s).display)).toBe("none");
+});

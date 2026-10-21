@@ -16,6 +16,8 @@
 @import "work-traffic.css";
 /* ASCII mode, the hidden terminal look (src/ascii): inert unless html.ascii is set. */
 @import "./ascii/ascii.css";
+/* The diagrams' node panel (src/node-panel): a box's details under the drawing, in the normal look. */
+@import "./node-panel/node-panel.css";
 /* /work/vllm/: the full-page mock-up, scoped under .vd-page and .vdemo. */
 @import "./vllm/demo/demo.css";
 

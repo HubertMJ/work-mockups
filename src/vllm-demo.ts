@@ -3,6 +3,7 @@
 // (this page has no switch button and no banner, so both stay quiet unless asked).
 
 import { setupAscii } from "./ascii";
+import { mountNodePanels } from "./node-panel";
 import { setupThemeToggle } from "./lib/theme-toggle";
 import { setupAbout } from "./vllm/demo/about";
 import { mountDemo } from "./vllm/demo/app";
@@ -11,5 +12,7 @@ document.documentElement.classList.add("js");
 setupThemeToggle();
 setupAscii(document.body.dataset.banner ?? "");
 setupAbout();
+// The About drawer's drawing: a box's details under it, as on the other pages.
+mountNodePanels();
 const root = document.getElementById("vdemo");
 if (root) mountDemo(root);

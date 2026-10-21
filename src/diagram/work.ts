@@ -10,6 +10,7 @@
 // needs the route; styles.css runs it only where motion is welcome. Nothing of it is a node or an edge,
 // so ASCII mode, which draws its own packets on the edges, reads the drawings exactly as before.
 
+import { panelMarkup } from "../node-panel/markup";
 import { el, esc, GAP, pathD, text, type Box, type Pt } from "./markup";
 
 type Role = "path" | "site" | "project" | "lab";
@@ -491,6 +492,10 @@ export function workSvg(d: WDiagram, view: WLayout["view"], only = false): strin
 /** The build's {{diagram.<id>.<view>}} substitutions. */
 export function workSvgs(): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const d of WORK_DIAGRAMS) for (const l of d.layouts) out[`diagram.${d.id}.${l.view}`] = workSvg(d, l.view, d.id === "vllm");
+  for (const d of WORK_DIAGRAMS) {
+    for (const l of d.layouts) out[`diagram.${d.id}.${l.view}`] = workSvg(d, l.view, d.id === "vllm");
+    // The node panel under the drawings: each box's sentence, as ASCII mode's popup says it.
+    out[`diagram.${d.id}.panel`] = panelMarkup(d.id, d.nodes.map((n) => ({ id: n.id, title: n.label, sub: n.sub, text: n.tip, role: n.role })));
+  }
   return out;
 }

@@ -50,6 +50,13 @@ test("About opens a dialog about the real system; Escape closes it and focus goe
   // Tab stays inside.
   for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
   expect(await page.evaluate(() => !!document.activeElement?.closest("#vd-about"))).toBe(true);
+  // If the Tabs reached a box of the drawing, its details opened under it: the first Escape closes
+  // those and leaves the drawer open, the next closes the drawer.
+  if ((await page.locator("#vd-about .np-panel").getAttribute("data-open")) === "true") {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#vd-about .np-panel")).toHaveAttribute("data-open", "false");
+    await expect(dlg).toBeVisible();
+  }
   await page.keyboard.press("Escape");
   await expect(dlg).toBeHidden();
   await expect(about).toBeFocused();

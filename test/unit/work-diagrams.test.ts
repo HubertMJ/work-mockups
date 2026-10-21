@@ -32,8 +32,14 @@ describe.each(WORK_DIAGRAMS.map((d) => [d.id, d] as const))("the %s drawing", (_
 });
 
 test("the markup: nodes are g[data-node] with a rect and a tip, edges are M/L paths, and no style attributes", () => {
-  const svgs = workSvgs();
+  const all = workSvgs();
+  const svgs = Object.fromEntries(Object.entries(all).filter(([k]) => !k.endsWith(".panel")));
   expect(Object.keys(svgs).sort()).toEqual(["diagram.bridge.narrow", "diagram.bridge.wide", "diagram.flota.narrow", "diagram.flota.wide", "diagram.vllm.narrow"]);
+  // Under each drawing, the node panel: an entry for every box, with what its ASCII popup says.
+  for (const d of WORK_DIAGRAMS) {
+    const doc = new DOMParser().parseFromString(all[`diagram.${d.id}.panel`], "text/html");
+    for (const n of d.nodes) expect(doc.querySelector(`.np-item[data-for="${n.id}"] .np-text`)?.textContent, `${d.id} ${n.id}`).toBe(n.tip);
+  }
   for (const [k, s] of Object.entries(svgs)) {
     const doc = new DOMParser().parseFromString(s, "image/svg+xml");
     const nodes = [...doc.querySelectorAll("g[data-node]")];
@@ -82,7 +88,7 @@ describe("the drawings' traffic", () => {
 
   test("every moving part has its rule, and none of it is a node or an edge (ASCII mode reads those)", () => {
     const css = trafficCss();
-    for (const [k, s] of Object.entries(workSvgs())) {
+    for (const [k, s] of Object.entries(workSvgs()).filter(([key]) => !key.endsWith(".panel"))) {
       const doc = new DOMParser().parseFromString(s, "image/svg+xml");
       const parts = [...doc.querySelectorAll(".wd-traffic [id]")];
       expect(parts.length, k).toBeGreaterThan(3);

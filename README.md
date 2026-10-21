@@ -10,6 +10,7 @@ the real code and there is no screenshot of the real thing.
 | `/work/bridge/` | Git forge ⇄ AI agent bridge: how it works, with its pipeline drawn |
 | `/work/flota/` | Flota: a fleet of AI coding sessions for one project, with its wiring drawn |
 | `/work/` | 302 to `/#projects`: the landing page's Projects section is the index of these pages |
+| `/work` | 301 to `/work/` (both redirects are paths, never `:8080`) |
 | `/work/assets/*` | content-hashed scripts, styles and fonts, cached for a year |
 | `/work/favicon.svg`, `/work/build.json` | the favicon; the commit and CI run the image was built from |
 | `/healthz` | `ok`, for probes |

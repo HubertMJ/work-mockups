@@ -188,6 +188,7 @@ test("a new deployment from the cache is created stopped; Reset brings the demo 
 
 test("the demo's charts are not diagrams: no data-node anywhere in it", async ({ page }) => {
   await tab(page, "telemetry");
-  await expect(page.locator(".vd-chart svg")).toHaveCount(12);
+  // Host 5, four cards × 4, and the chosen engine's 9.
+  await expect(page.locator(".vd-chart svg")).toHaveCount(30);
   expect(await page.locator("#vdemo [data-node]").count()).toBe(0);
 });

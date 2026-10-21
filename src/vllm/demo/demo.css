@@ -333,27 +333,71 @@ body.vd-page { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .vd-dl__stats strong { color: var(--vd-text); font: 600 0.82rem var(--vd-mono); }
 
 /* ---------- Telemetry ---------- */
-.vd-tele__note { font-size: 0.82rem; }
-.vd-tele__grid { display: flex; flex-direction: column; gap: 16px; }
+/* Two series in one chart: cyan and orange (checked for colour-blind separation on the card colour),
+ * the second also dashed, and both named in the legend, so colour is never the only cue. */
+.vdemo { --vd-s0: #1c9bbf; --vd-s1: #d4702e; }
+.vd-tele__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; }
+.vd-tele__note { flex: 1 1 18rem; min-width: 0; font-size: 0.8rem; }
+.vd-tele__sampled { font-variant-numeric: tabular-nums; }
+.vd-seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--vd-line); border-radius: 9px; background: var(--vd-panel); }
+.vd-seg__btn { min-height: 2rem; padding: 0.25rem 0.75rem; border: 0; border-radius: 6px; background: transparent; color: var(--vd-muted); font: 500 0.84rem var(--font-sans); cursor: pointer; }
+.vd-seg__btn:hover { color: var(--vd-text); }
+.vd-seg__btn[aria-pressed="true"] { background: var(--vd-raise); color: var(--vd-text); box-shadow: inset 0 0 0 1px var(--vd-line-2); }
+.vd-tele__filter { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.84rem; }
+.vd-tele__filter .vd-input { width: auto; min-width: 9rem; min-height: 2.1rem; padding-block: 0.25rem; }
 .vd-tele { display: flex; flex-direction: column; gap: 0.75rem; }
-.vd-tele__head { display: flex; align-items: center; justify-content: space-between; }
-.vd-tele__head .vd-h { margin: 0; }
-.vd-tele > .vd-chips { min-height: 1.8rem; font-size: 0.82rem; }
-.vd-tele__charts { display: grid; gap: 12px; }
-@media (min-width: 760px) { .vd-tele__charts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.vd-tele[hidden] { display: none; }
+.vd-tele__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem 1rem; }
+.vd-tele__head .vd-h { margin: 0; flex-wrap: wrap; }
+.vd-tele__what { font-weight: 400; font-size: 0.82rem; }
+.vd-tele__right { display: flex; align-items: center; gap: 0.75rem; }
+.vd-tele__load { font: 0.78rem var(--vd-mono); color: var(--vd-muted); font-variant-numeric: tabular-nums; }
+.vd-tele__res { min-height: 1.8rem; font-size: 0.82rem; }
+.vd-tele__charts { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 760px) {
+  .vd-tele__charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vd-tele__charts--host, .vd-tele__charts--engine { grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+}
+.vd-tele__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.3rem 1rem; color: var(--vd-faint); font: 0.74rem var(--vd-mono); font-variant-numeric: tabular-nums; }
+.vd-tele__footbar { display: flex; flex-direction: column; gap: 0.25rem; flex: 1 1 14rem; min-width: 0; }
+.vd-tele__meter { margin: 0; }
+.vd-tele__clocks { min-height: 1.2em; }
+.vd-tele__ehead { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; }
+.vd-tele__estate { flex: 1 1 16rem; min-width: 0; min-height: 1.4em; color: var(--vd-muted); font-size: 0.84rem; overflow-wrap: anywhere; }
 .vd-chart { margin: 0; min-width: 0; padding: 0.65rem 0.75rem; border: 1px solid var(--vd-line); border-radius: 10px; background: var(--vd-card); }
-.vd-chart__head { display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.82rem; }
-.vd-chart__value { font: 600 0.85rem var(--vd-mono); font-variant-numeric: tabular-nums; }
+.vd-chart__head { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.82rem; }
+.vd-chart__title { color: var(--vd-text); font-weight: 500; }
+.vd-chart__value { font: 600 0.85rem var(--vd-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vd-chart__meta { display: flex; min-height: 1.35rem; align-items: center; margin-bottom: 0.2rem; font-size: 0.72rem; }
+.vd-chart__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vd-chart__keys { display: flex; flex-wrap: wrap; gap: 0.1rem 0.8rem; color: var(--vd-muted); }
+.vd-chart__key { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.vd-chart__keyval { color: var(--vd-text); font: 600 0.76rem var(--vd-mono); font-variant-numeric: tabular-nums; }
+.vd-chart__swatch { display: inline-block; width: 14px; height: 0; border-top: 2px solid var(--vd-s0); }
+.vd-chart__key--1 .vd-chart__swatch { border-top: 2px dashed var(--vd-s1); }
 .vd-chart__plot { display: grid; grid-template-columns: 3.6rem minmax(0, 1fr); gap: 0.4rem; }
-.vd-chart__y { display: flex; flex-direction: column; justify-content: space-between; color: var(--vd-faint); font: 0.64rem/1 var(--vd-mono); text-align: right; }
+.vd-chart__y { display: flex; flex-direction: column; justify-content: space-between; color: var(--vd-faint); font: 0.64rem/1 var(--vd-mono); text-align: right; white-space: nowrap; }
 .vd-chart__svg { display: block; width: 100%; height: 88px; overflow: visible; cursor: crosshair; touch-action: pan-y; }
 .vd-chart__area { fill: rgba(34 195 230 / 0.14); }
 .vd-chart__line { fill: none; stroke: var(--vd-accent); stroke-width: 2px; stroke-linejoin: round; }
+.vd-chart__line--0 { stroke: var(--vd-s0); }
+.vd-chart__line--1 { stroke: var(--vd-s1); stroke-dasharray: 5 3; }
 .vd-chart__grid { stroke: var(--vd-line); stroke-width: 1px; }
 .vd-chart__mark { stroke: var(--vd-warn); stroke-width: 1px; stroke-dasharray: 4 4; }
 .vd-chart__cross { stroke: var(--vd-muted); stroke-width: 1px; }
 .vd-chart__x { display: flex; justify-content: space-between; gap: 0.5rem; margin: 0.3rem 0 0 4rem; color: var(--vd-faint); font: 0.66rem var(--vd-mono); }
-.vd-chart__readout { color: var(--vd-text); text-align: center; white-space: nowrap; overflow: hidden; }
+.vd-chart__readout { color: var(--vd-text); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* The engines' summary: a table that scrolls sideways inside its panel on a phone, never the page. */
+.vd-etable { overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--vd-line); border-radius: 10px; background: var(--vd-card); }
+.vd-etable__t { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.vd-etable__t th, .vd-etable__t td { padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--vd-line); text-align: left; white-space: nowrap; }
+.vd-etable__t thead th { color: var(--vd-faint); font-size: 0.68rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; }
+.vd-etable__t tbody tr:last-child > * { border-bottom: 0; }
+.vd-etable__t tr.is-on > * { background: var(--vd-accent-bg); }
+.vd-num { font-family: var(--vd-mono); font-variant-numeric: tabular-nums; text-align: right !important; min-width: 5.5rem; }
+.vd-linkbtn { padding: 0.15rem 0; border: 0; background: none; color: var(--vd-text); font: 600 0.82rem var(--vd-mono); cursor: pointer; text-decoration: underline; text-decoration-color: var(--vd-line-2); text-underline-offset: 3px; }
+.vd-linkbtn:hover { color: var(--vd-accent); text-decoration-color: currentColor; }
 
 /* ---------- API ---------- */
 .vd-api { display: flex; flex-direction: column; gap: 0.5rem; }

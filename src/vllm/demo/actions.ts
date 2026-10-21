@@ -1,18 +1,21 @@
 // What the visitor can do, as pure functions of the State. Each returns the next State, plus the
 // refusal or conflict when there is one, so the view can show it and the unit tests can check it.
 
-import { admit, admitOnCard, type Admission } from "./admission";
+import { admit, admitCards, type Admission } from "./admission";
 import { answerFor, tokens } from "./answers";
-import { budget, CEILING, dep, GIB, planBudget, replaceDep, resolveAlias, round2, span, STOP_MS, util } from "./model";
+import { defaultConfig, estimateFloor, memOf, validate, type Draft, type Problems } from "./config";
+import { budget, cardsOf, CEILING, dep, GIB, cardsText, planBudget, replaceDep, resolveAlias, span, STOP_MS, util } from "./model";
 import { deleteConflict, editConflict, pinConflict, plan } from "./planner";
 import { logRequest, note, pushLog } from "./sim";
-import type { CachedModel, Conflict, Deployment, Reservation, State } from "./types";
+import type { CachedModel, Conflict, Deployment, EngineConfig, Reservation, State } from "./types";
 
 export interface Result {
   state: State;
   refused?: Admission & { ok: false };
   conflict?: Conflict;
   error?: string;
+  /** Every field a refused save has to change, for the form to mark. */
+  problems?: Problems;
 }
 
 const replan = (s: State): State => {
@@ -50,9 +53,9 @@ export function start(s: State, alias: string): Result {
   const src = d.source === "estimate" ? "estimate" : "measured";
   const out = begin(s, alias, a.evict);
   const text = a.evict.length
-    ? `Evicted ${a.evict.join(", ")} (idle, lazy, least recently used) from GPU ${d.gpu} to make room; starting ${alias} on ${util(budget(d))} (${src}).`
-    : `Starting ${alias} on GPU ${d.gpu}: admitted on ${util(budget(d))} (${src}); the card's budget goes ${util(a.load)} → ${util(a.after)} of ${util(CEILING)}.`;
-  return { state: note(logOn(out, alias, "INFO", `manager: admitted on GPU ${d.gpu}, budget ${util(budget(d))} (${src})`), "info", text) };
+    ? `Evicted ${a.evict.join(", ")} (idle, lazy, least recently used) from ${cardsText(d)} to make room; starting ${alias} on ${util(budget(d))} (${src}).`
+    : `Starting ${alias} on ${cardsText(d)}: admitted on ${util(budget(d))}${cardsOf(d.cfg) > 1 ? " per card" : ""} (${src}); the ${cardsOf(d.cfg) > 1 ? "fullest card's" : "card's"} budget goes ${util(a.load)} → ${util(a.after)} of ${util(CEILING)}.`;
+  return { state: note(logOn(out, alias, "INFO", `manager: admitted on ${cardsText(d)}, budget ${util(budget(d))} (${src})`), "info", text) };
 }
 
 export function stop(s: State, alias: string): Result {
@@ -65,7 +68,8 @@ export function stop(s: State, alias: string): Result {
 export function restart(s: State, alias: string): Result {
   const d = dep(s, alias);
   if (!d || d.status !== "Running" || d.phase) return { state: s };
-  const a = admitOnCard(s, d.gpu, planBudget(d), alias);
+  const n = cardsOf(d.pending?.cfg ?? d.cfg);
+  const a = admitCards(s, Array.from({ length: n }, (_, i) => d.gpu + i), planBudget(d), alias);
   if (!a.ok) return refuse(s, alias, a, "Restart");
   let out = s;
   for (const v of a.evict) out = replaceDep(out, v, (x) => ({ ...x, status: "Stopping", phase: { kind: "stop", at: s.now, step: 0, why: `evicted for ${alias}` } }));
@@ -87,25 +91,53 @@ export interface Edit {
   maxLen: number;
   maxSeqs: number;
   lazy: boolean;
+  /** Left out: the engine settings stay as they are. */
+  cfg?: EngineConfig;
+  extraAliases?: string[];
+  /** A new first card; only taken while the deployment is down. */
+  gpu?: number;
+}
+
+/** Settings the manager and the gateway read themselves: a running engine never needs a restart for them. */
+const engineSide = (c: EngineConfig): string => JSON.stringify({ ...c, coldStartS: 0, idleMin: 0 });
+
+/** The first problem of a set, as the one-line error the status shows. */
+const first = (p: Problems): string | undefined => Object.values(p).find(Boolean);
+
+/** Names another deployment already answers to. */
+function taken(s: State, names: string[], self: string): string | undefined {
+  return names.find((n) => s.deps.some((d) => d.alias !== self && (d.alias === n || d.extraAliases.includes(n))));
 }
 
 export function edit(s: State, alias: string, e: Edit): Result {
   const d = dep(s, alias);
   if (!d || d.status === "Stopping") return { state: s };
-  if (!Number.isInteger(e.maxSeqs) || e.maxSeqs < 1 || e.maxSeqs > 1024) return { state: s, error: "Max seqs must be a whole number from 1 to 1024." };
+  const cfg = e.cfg ?? d.cfg;
+  const extraAliases = e.extraAliases ?? d.extraAliases;
+  const m = s.catalog.find((x) => x.repo === d.model);
   const live = d.status === "Running" || d.status === "Starting";
-  const changed = e.maxLen !== d.maxLen || e.maxSeqs !== d.maxSeqs;
+  const gpu = live ? d.gpu : (e.gpu ?? d.gpu);
+  const draft: Draft = { alias, repo: d.model, gpu, maxLen: e.maxLen, maxSeqs: e.maxSeqs, lazy: e.lazy, extraAliases, cfg };
+  const problems = validate(draft, m ?? { ...placeholder, maxCtx: Math.max(d.maxLen, e.maxLen), kind: d.kind }, s.gpus.length, "edit");
+  const clash = taken(s, extraAliases, alias);
+  if (clash) problems.extraAliases = `${clash} already reaches another deployment.`;
+  if (first(problems)) return { state: s, error: first(problems), problems };
+  const changed = e.maxLen !== d.maxLen || e.maxSeqs !== d.maxSeqs || engineSide(cfg) !== engineSide(d.cfg);
   const next: Deployment = live
-    ? { ...d, lazy: e.lazy, pending: changed ? { maxLen: e.maxLen, maxSeqs: e.maxSeqs } : null }
-    : { ...d, lazy: e.lazy, maxLen: e.maxLen, maxSeqs: e.maxSeqs, pending: null };
+    ? { ...d, lazy: e.lazy, extraAliases, cfg: { ...d.cfg, coldStartS: cfg.coldStartS, idleMin: cfg.idleMin }, pending: changed ? { maxLen: e.maxLen, maxSeqs: e.maxSeqs, cfg } : null }
+    : { ...d, gpu, lazy: e.lazy, extraAliases, cfg, maxLen: e.maxLen, maxSeqs: e.maxSeqs, pending: null };
   const after = replaceDep(s, alias, () => next);
-  if (planBudget(next) > planBudget(d)) {
+  const moved = gpu !== d.gpu || cardsOf(next.pending?.cfg ?? next.cfg) !== cardsOf(d.pending?.cfg ?? d.cfg);
+  if (planBudget(next) > planBudget(d) || moved) {
     const conflict = editConflict(s, after, alias);
     if (conflict) return { state: note(s, "warn", `Edit of ${alias} refused, 409: conflicts with reservation ${conflict.item.name}.`), conflict };
   }
-  const what = live && changed ? "restart to apply" : changed && e.maxLen !== d.maxLen ? `its profile is re-estimated at ${util(planBudget(next))} until the next start measures it` : "saved";
+  const what = live && changed ? "restart to apply" : changed && planBudget(next) !== planBudget(d) ? `its floor is re-estimated at ${util(planBudget(next))} until the next start measures it` : "saved";
   return { state: replan(note(after, "info", `Saved ${alias}: max length ${e.maxLen}, max seqs ${e.maxSeqs}; ${what}.`)) };
 }
+
+/** Stands in for a cache entry that has gone, so an edit can still be checked. */
+const placeholder: CachedModel = { repo: "", arch: "", params: "", weightsGiB: 0, maxCtx: 131072, kvPerK: 0, precision: "bf16", kind: "generate", cached: true };
 
 export function remove(s: State, alias: string): Result {
   const d = dep(s, alias);
@@ -142,7 +174,7 @@ export function unblock(s: State, gpu: number): Result {
 // ---------- new deployments ----------
 
 /** The floor a new deployment is admitted on until its first start measures it. */
-export const estimate = (m: CachedModel, maxLen: number): number => round2((m.weightsGiB * 1.05 + 1.5 + (maxLen / 1024) * m.kvPerK) / 96);
+export const estimate = (m: CachedModel, maxLen: number, cfg: EngineConfig = defaultConfig()): number => estimateFloor(m, maxLen, cfg);
 
 export interface NewDeployment {
   alias: string;
@@ -151,22 +183,32 @@ export interface NewDeployment {
   maxLen: number;
   maxSeqs: number;
   lazy: boolean;
+  /** Left out: the defaults. */
+  cfg?: EngineConfig;
+  extraAliases?: string[];
 }
 
 export function create(s: State, n: NewDeployment): Result {
   const alias = n.alias.trim();
-  if (!/^[a-z0-9][a-z0-9.-]{1,39}$/.test(alias)) return { state: s, error: "An alias is 2 to 40 characters: lower-case letters, digits, dots and dashes." };
-  if (resolveAlias(s, alias)) return { state: s, error: `${alias} is taken.` };
+  if (!/^[a-z0-9][a-z0-9.-]{1,39}$/.test(alias)) return { state: s, error: "An alias is 2 to 40 characters: lower-case letters, digits, dots and dashes.", problems: { alias: "2 to 40 characters: lower-case letters, digits, dots and dashes." } };
+  if (resolveAlias(s, alias)) return { state: s, error: `${alias} is taken.`, problems: { alias: `${alias} is taken.` } };
   const m = s.catalog.find((c) => c.repo === n.repo && c.cached);
-  if (!m) return { state: s, error: "Pick a model from the cache." };
-  if (!Number.isInteger(n.maxSeqs) || n.maxSeqs < 1 || n.maxSeqs > 1024) return { state: s, error: "Max seqs must be a whole number from 1 to 1024." };
-  const est = estimate(m, n.maxLen);
+  if (!m) return { state: s, error: "Pick a model from the cache.", problems: { repo: "Pick a model from the cache." } };
+  if (!Number.isInteger(n.maxSeqs) || n.maxSeqs < 1 || n.maxSeqs > 1024) return { state: s, error: "Max seqs must be a whole number from 1 to 1024.", problems: { maxSeqs: "Max seqs must be a whole number from 1 to 1024." } };
+  const cfg = n.cfg ?? defaultConfig();
+  const extraAliases = n.extraAliases ?? [];
+  const problems = validate({ ...n, alias, cfg, extraAliases }, m, s.gpus.length);
+  const clash = taken(s, extraAliases, alias);
+  if (clash) problems.extraAliases = `${clash} already reaches another deployment.`;
+  if (first(problems)) return { state: s, error: first(problems), problems };
+  const est = cfg.memUtil ?? estimate(m, n.maxLen, cfg);
   const d: Deployment = {
     alias, model: m.repo, gpu: n.gpu, kind: m.kind, status: "Stopped", pinned: false, lazy: n.lazy,
-    minUtil: est, source: "estimate", profileLen: n.maxLen, drift: 0.03, maxLen: n.maxLen, maxSeqs: n.maxSeqs,
-    kvTokens: null, kvLen: n.maxLen, pending: null, extraAliases: [], error: null, refused: null, lastUsed: s.now, phase: null, log: [], load: 0.3,
+    minUtil: est, source: "estimate", profileLen: n.maxLen, profileCfg: cfg, cfg, mem: memOf(m), drift: 0.03, maxLen: n.maxLen, maxSeqs: n.maxSeqs,
+    kvTokens: null, kvLen: n.maxLen, pending: null, extraAliases, error: null, refused: null, lastUsed: s.now, phase: null, log: [], load: 0.3,
   };
-  return { state: note({ ...s, deps: [...s.deps, d] }, "info", `Created ${alias} on GPU ${n.gpu}, stopped, admitted on an estimate of ${util(est)} until its first start.`) };
+  const where = cardsOf(cfg) > 1 ? `GPU ${n.gpu}–${n.gpu + cardsOf(cfg) - 1}` : `GPU ${n.gpu}`;
+  return { state: note({ ...s, deps: [...s.deps, d] }, "info", `Created ${alias} on ${where}, stopped, admitted on an estimate of ${util(est)}${cardsOf(cfg) > 1 ? " per card" : ""} until its first start.`) };
 }
 
 // ---------- reservations ----------

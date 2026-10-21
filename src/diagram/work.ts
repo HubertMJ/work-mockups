@@ -3,6 +3,12 @@
 // orthogonal M/L paths (class em-edge) with their labels; zones are dashed frames. scripts/build.mjs
 // writes them into the pages at build time, a wide and a narrow drawing each where the page has room
 // for both, so ASCII mode (src/ascii) can redraw them in characters and show each box's popup.
+//
+// Traffic, as on the landing page and the lab: a dot runs each drawing's routes in turn, the edges it
+// passes brighten and each box it reaches shows a halo. Routes and timing are generated into a
+// stylesheet (trafficCss) the build bundles, since the CSP allows no style attribute and offset-path
+// needs the route; styles.css runs it only where motion is welcome. Nothing of it is a node or an edge,
+// so ASCII mode, which draws its own packets on the edges, reads the drawings exactly as before.
 
 import { el, esc, GAP, pathD, text, type Box, type Pt } from "./markup";
 
@@ -319,11 +325,152 @@ function edgeMarkup(e: WEdge, marker: string): string {
   );
 }
 
+// ---------- traffic ----------
+
+/** Each drawing's routes, as the boxes a dot passes; they run one after another, then the round repeats. */
+export const ROUTES: Record<WDiagram["id"], string[][]> = {
+  vllm: [
+    ["clients", "gateway", "manager", "docker", "engines"],
+    ["clients", "gateway", "engines"],
+    ["ui", "manager", "planner"],
+  ],
+  bridge: [
+    ["mention", "webhook", "who", "mode", "queue", "run", "passes", "pr"],
+    ["gate", "run"],
+    ["run", "checkpoints"],
+    ["queue", "portal"],
+  ],
+  flota: [
+    ["owner", "pm", "sections", "merger", "main"],
+    ["guard", "pm"],
+    ["guard", "sections"],
+    ["sections", "state"],
+  ],
+};
+/** Units a dot covers per second, the shortest run and the rest before the next route starts. */
+export const PACE = { speed: 260, minTravel: 1.1, rest: 0.5 } as const;
+
+/** The box an edge's end touches (an arrow stops GAP short of it); none for an edge into a zone. */
+function touching(lay: WLayout, p: Pt): string | undefined {
+  const t = GAP + 1.5;
+  return Object.entries(lay.boxes).find(([, b]) => p[0] >= b.x - t && p[0] <= b.x + b.w + t && p[1] >= b.y - t && p[1] <= b.y + b.h + t)?.[0];
+}
+
+export interface Lane {
+  route: string[];
+  /** The edges in the dot's order, each as drawn or reversed (a two-way edge run against its arrow). */
+  legs: { edge: number; pts: Pt[] }[];
+  /** Start and end of the dot's run, seconds into the round. */
+  start: number;
+  travel: number;
+  /** The dot's path: the first box's centre, along the legs, into the last box's centre. */
+  path: Pt[];
+  /** Where each leg starts and ends, and where each box is reached, as fractions of the path. */
+  spans: [number, number][];
+  reach: number[];
+}
+
+const dist = (a: Pt, b: Pt) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+const length = (pts: Pt[]) => pts.slice(1).reduce((n, q, i) => n + dist(pts[i], q), 0);
+
+/** A drawing's lanes and the length of one round. A route whose edges the drawing lacks is left out. */
+export function lanes(lay: WLayout, routes: string[][]): { lanes: Lane[]; period: number } {
+  const ends = lay.edges.map((e) => [touching(lay, e.pts[0]), touching(lay, e.pts[e.pts.length - 1])] as const);
+  const out: Lane[] = [];
+  let t = 0;
+  for (const route of routes) {
+    const legs: Lane["legs"] = [];
+    for (let i = 1; i < route.length; i++) {
+      const [a, b] = [route[i - 1], route[i]];
+      let k = ends.findIndex(([f, to]) => f === a && to === b);
+      let pts = k >= 0 ? lay.edges[k].pts : [];
+      if (k < 0) {
+        k = ends.findIndex(([f, to], j) => f === b && to === a && lay.edges[j].both);
+        if (k >= 0) pts = [...lay.edges[k].pts].reverse();
+      }
+      if (k < 0) break;
+      legs.push({ edge: k, pts });
+    }
+    if (legs.length !== route.length - 1) continue;
+    const box = (id: string) => lay.boxes[id];
+    const centre = (id: string): Pt => [box(id).x + box(id).w / 2, box(id).y + box(id).h / 2];
+    const path: Pt[] = [centre(route[0]), ...legs.flatMap((l) => l.pts), centre(route[route.length - 1])];
+    const total = length(path);
+    const spans: [number, number][] = [];
+    const reach: number[] = [0];
+    let at = dist(path[0], legs[0].pts[0]);
+    legs.forEach((l, i) => {
+      const len = length(l.pts);
+      spans.push([at / total, (at + len) / total]);
+      at += len;
+      const next = legs[i + 1];
+      // Through the box between two legs (hidden under it): its centre is half way.
+      const through = next ? dist(l.pts[l.pts.length - 1], next.pts[0]) : dist(l.pts[l.pts.length - 1], path[path.length - 1]);
+      reach.push((at + through / 2) / total);
+      at += through;
+    });
+    reach[reach.length - 1] = 1;
+    const travel = Math.max(PACE.minTravel, total / PACE.speed);
+    out.push({ route, legs, start: t, travel, path, spans, reach });
+    t += travel + PACE.rest;
+  }
+  return { lanes: out, period: Math.round(t * 100) / 100 };
+}
+
+const prefix = (d: WDiagram, view: WLayout["view"]) => `wd-${d.id}-${view}`;
+
+/** The moving parts' markup: under the boxes (a dot sinks into a box and comes out the other side). */
+function trafficMarkup(d: WDiagram, lay: WLayout): string[] {
+  const p = prefix(d, lay.view);
+  const { lanes: ls } = lanes(lay, ROUTES[d.id]);
+  const glows = ls.flatMap((l, i) => l.legs.map((g, k) => el("path", { class: "wd-glow", id: `${p}-glow-${i}-${k}`, d: pathD(g.pts) })));
+  const halos = ls.flatMap((l, i) =>
+    l.route.slice(1).map((id, k) => {
+      const b = lay.boxes[id];
+      return el("rect", { class: "wd-halo", id: `${p}-halo-${i}-${k + 1}`, x: b.x - 3, y: b.y - 3, width: b.w + 6, height: b.h + 6, rx: 9 });
+    }),
+  );
+  const dots = ls.map((_, i) => el("circle", { class: "wd-dot", id: `${p}-dot-${i}`, r: 4 }));
+  return [el("g", { class: "wd-traffic", "aria-hidden": "true" }, ...glows, ...halos, ...dots)];
+}
+
+/** One drawing's routes and timing as CSS: per dot its offset-path and keyframes, per glow and halo its
+ * moment in the round. Percentages of one round, so every part of a drawing shares one clock. */
+function laneCss(d: WDiagram, lay: WLayout): string[] {
+  const p = prefix(d, lay.view);
+  const { lanes: ls, period } = lanes(lay, ROUTES[d.id]);
+  const pct = (s: number) => `${Math.round(Math.min(100, Math.max(0, (s / period) * 100)) * 100) / 100}%`;
+  const css: string[] = [];
+  ls.forEach((l, i) => {
+    const at = (f: number) => l.start + l.travel * f;
+    const name = `${p}-tr-${i}`;
+    css.push(`#${p}-dot-${i} { offset-path: path("${pathD(l.path)}"); --tr-name: ${name}; --tr-period: ${period}s; }`);
+    css.push(`@keyframes ${name} { 0%, ${pct(l.start)} { offset-distance: 0%; opacity: 0; } ${pct(at(0.04))} { opacity: 1; } ${pct(at(0.96))} { opacity: 1; } ${pct(at(1))}, 100% { offset-distance: 100%; opacity: 0; } }`);
+    l.spans.forEach(([s0, s1], k) => {
+      const g = `${p}-gl-${i}-${k}`;
+      css.push(`#${p}-glow-${i}-${k} { --tr-name: ${g}; --tr-period: ${period}s; }`);
+      css.push(`@keyframes ${g} { 0%, ${pct(at(s0))} { opacity: 0; } ${pct(at(s0) + 0.08)}, ${pct(at(s1))} { opacity: 1; } ${pct(at(s1) + 0.45)}, 100% { opacity: 0; } }`);
+    });
+    l.reach.slice(1).forEach((f, k) => {
+      const h = `${p}-ha-${i}-${k + 1}`;
+      css.push(`#${p}-halo-${i}-${k + 1} { --tr-name: ${h}; --tr-period: ${period}s; }`);
+      css.push(`@keyframes ${h} { 0%, ${pct(at(f) - 0.05)} { opacity: 0; } ${pct(at(f) + 0.08)} { opacity: 1; } ${pct(at(f) + 0.6)}, 100% { opacity: 0; } }`);
+    });
+  });
+  return css;
+}
+
+/** The traffic's stylesheet for every drawing (styles.css imports it as work-traffic.css; the build supplies it). */
+export function trafficCss(): string {
+  const rules = WORK_DIAGRAMS.flatMap((d) => d.layouts.flatMap((l) => laneCss(d, l)));
+  return ["/* Generated by src/diagram/work.ts (trafficCss) at build time: the drawings' traffic. */", ...rules, ""].join("\n");
+}
+
 /** One drawing as an inline <svg>. `only`: the page shows this drawing at every width (the vLLM drawer). */
 export function workSvg(d: WDiagram, view: WLayout["view"], only = false): string {
   const lay = d.layouts.find((l) => l.view === view);
   if (!lay) throw new Error(`${d.id} has no ${view} drawing`);
-  const p = `wd-${d.id}-${view}`;
+  const p = prefix(d, view);
   const marker = `${p}-arrow`;
   const zones = lay.zones.map((z) =>
     el("g", { class: "em-zone" }, el("rect", { x: z.box.x, y: z.box.y, width: z.box.w, height: z.box.h, rx: 9 }), el("text", { class: "em-zone-title", x: z.box.x + 12, y: z.box.y + 20 }, esc(z.title), el("tspan", { class: "em-zone-sub" }, esc(z.sub ? ` ${z.sub}` : "")))),
@@ -336,6 +483,7 @@ export function workSvg(d: WDiagram, view: WLayout["view"], only = false): strin
     el("defs", {}, el("marker", { id: marker, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, el("path", { class: "em-arrowhead", d: "M0,0 L10,5 L0,10 z" }))),
     ...zones,
     ...lay.edges.map((e) => edgeMarkup(e, marker)),
+    ...trafficMarkup(d, lay),
     ...d.nodes.map((n) => nodeMarkup(n, lay.boxes[n.id])),
   );
 }

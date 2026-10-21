@@ -24,7 +24,8 @@ answers 404 there. The Gateway routes `/work/` here.
 - `src/vllm/demo/`: the vLLM mock-up. The rules (admission, eviction, the reservation planner, the
   analytics) are pure functions over one state; the views draw from it.
 - `src/diagram/work.ts`: the three architecture drawings, as data and markup, in the same visual
-  language as the landing page's "The way in" (`src/diagram/markup.ts` holds the shared helpers).
+  language as the landing page's "The way in" (`src/diagram/markup.ts` holds the shared helpers), and
+  their traffic: the routes a dot runs, generated at build time into `work-traffic.css`.
 - `src/ascii/`: the site's hidden ASCII mode, an identical copy of hubertjablon.ski's `src/ascii/`.
 - `src/styles.css`: a copy of the site's stylesheet (tokens and components) plus the /work/ blocks.
 - `scripts/build.mjs`: the bundle; `scripts/serve.mjs`: a static server with the same headers.

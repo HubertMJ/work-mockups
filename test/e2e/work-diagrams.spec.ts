@@ -121,3 +121,44 @@ for (const p of PAGES) {
     expect(await tip.evaluate((t) => !document.querySelector("dialog[open]") || !!t.closest("dialog[open]"))).toBe(true);
   });
 }
+
+// The traffic: a dot runs each route in turn, as on the landing page. It moves by transform, so the page
+// never moves with it; with reduced motion nothing of it is drawn; in ASCII mode the drawing's own
+// packets take over.
+for (const p of PAGES) {
+  test(`the ${p.id} drawing's traffic runs, and the page stays still`, async ({ page }) => {
+    await page.goto(p.path);
+    if (p.open) await openAbout(page);
+    const shown = page.locator(`svg.wd-map[data-diagram="${p.id}"]:visible`);
+    const state = () =>
+      shown.evaluate((svg) => {
+        const dots = [...svg.querySelectorAll<SVGCircleElement>(".wd-dot")];
+        return { dots: dots.length, drawn: dots.every((d) => getComputedStyle(d).display !== "none"), running: dots.every((d) => d.getAnimations().some((a) => a.playState === "running")), time: Number(dots[0].getAnimations()[0]?.currentTime ?? 0) };
+      });
+    const before = await state();
+    expect(before.dots).toBeGreaterThan(0);
+    expect(before).toMatchObject({ drawn: true, running: true });
+    const still = () => page.evaluate(() => [document.documentElement.scrollHeight, scrollY, document.querySelector(".vd-about")?.scrollHeight ?? 0]);
+    const at0 = await still();
+    await page.waitForTimeout(800);
+    expect((await state()).time).toBeGreaterThan(before.time);
+    expect(await still()).toEqual(at0);
+  });
+}
+
+test.describe("with reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+  test("no drawing's traffic is drawn", async ({ page }) => {
+    for (const p of PAGES) {
+      await page.goto(p.path);
+      if (p.open) await openAbout(page);
+      expect(await page.locator(".wd-dot, .wd-glow, .wd-halo").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length), p.id).toBe(0);
+    }
+  });
+});
+
+test("in ASCII mode the SVG's dots stay off: the character drawing runs its own packets", async ({ page }) => {
+  await page.goto("/work/bridge/?ascii=1");
+  await expect(page.locator("pre.ascii-dg:not([hidden])")).toHaveCount(1);
+  expect(await page.locator(".wd-dot").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length)).toBe(0);
+});

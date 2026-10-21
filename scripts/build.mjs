@@ -29,6 +29,17 @@ async function loadDiagrams() {
   return import(`data:text/javascript;base64,${Buffer.from(r.outputFiles[0].text).toString("base64")}`);
 }
 
+const diagrams = await loadDiagrams();
+
+/** styles.css's `@import "work-traffic.css"`: the drawings' traffic (routes and timing), generated. */
+const trafficPlugin = {
+  name: "work-traffic",
+  setup(build) {
+    build.onResolve({ filter: /^work-traffic\.css$/ }, () => ({ path: "work-traffic.css", namespace: "diagram" }));
+    build.onLoad({ filter: /.*/, namespace: "diagram" }, () => ({ contents: diagrams.trafficCss(), loader: "css" }));
+  },
+};
+
 await rm(out, { recursive: true, force: true });
 await mkdir(join(out, "work", "assets"), { recursive: true });
 
@@ -47,11 +58,12 @@ const result = await esbuild.build({
   loader: { ".woff2": "file" },
   assetNames: "[name]-[hash]",
   logLevel: "warning",
+  plugins: [trafficPlugin],
 });
 
 // The architecture drawings go into the pages as inline SVG, so they are there before any script runs
 // and never shift the layout.
-const names = { ...(await loadDiagrams()).workSvgs() };
+const names = { ...diagrams.workSvgs() };
 for (const [file, meta] of Object.entries(result.metafile.outputs)) {
   if (!meta.entryPoint) continue;
   const ext = file.endsWith(".css") ? "css" : "js";

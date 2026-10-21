@@ -23,10 +23,10 @@ function offset(el: Element, svg: Element): [number, number] {
 }
 
 /** The colour class of a node: its role--x class, the landing page's project colour (em-site,
- * em-project, em-lab on the node or its box group), or neutral. */
+ * em-project, em-lab, em-work on the node or its box group), or neutral. */
 const role = (el: Element): string => {
   const all = `${cls(el)} ${cls(el.querySelector("g"))}`;
-  return all.match(/role--([\w-]+)/)?.[1] ?? all.match(/\bem-(site|project|lab|path)\b/)?.[1] ?? "neutral";
+  return all.match(/role--([\w-]+)/)?.[1] ?? all.match(/\bem-(site|project|lab|work|path)\b/)?.[1] ?? "neutral";
 };
 
 /** Word-wrap one line to `w` characters, breaking at " · " or spaces. */

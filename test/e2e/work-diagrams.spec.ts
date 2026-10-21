@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { diagramProblems } from "./diagram-check";
 
 // The /work/ pages' architecture drawings (src/diagram/work.ts), held to the same rules as "The way in"
 // on the landing page: every word inside its box (10 units clear of the box's sides) and clear of the
@@ -233,3 +234,20 @@ test("the node panel shows at once with reduced motion, and is not there in ASCI
   await expect(page.locator("html")).toHaveClass(/ascii/);
   expect(await page.locator(".np-slot").evaluate((s) => getComputedStyle(s).display)).toBe("none");
 });
+
+// Every drawing set in the fonts it ships, measured at phone and desktop widths: the words in their
+// boxes with room, every label clear of boxes, arrowheads, lines and other labels (diagram-check.ts).
+// Tagged @fonts: it runs again with other system fonts (playwright.config.ts, the *-fonts projects).
+for (const p of PAGES) {
+  test(`the ${p.id} drawing draws in its own fonts and keeps its clearances at every width @fonts`, async ({ page }) => {
+    for (const width of [360, 390, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(p.path);
+      if (p.open) await openAbout(page);
+      const problems = await diagramProblems(page);
+      expect(await page.evaluate(() => document.fonts.check("650 14px LabDiagramSans") && document.fonts.check("10.5px LabDiagramMono"))).toBe(true);
+      expect(await page.locator("svg.wd-map:visible .em-label").first().evaluate((t) => getComputedStyle(t).fontFamily)).toMatch(/^"?LabDiagramSans/);
+      expect(problems, `${p.id} at ${width}`).toEqual([]);
+    }
+  });
+}

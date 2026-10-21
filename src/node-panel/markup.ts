@@ -13,10 +13,14 @@ export interface PanelItem {
   sub?: string;
   /** What ASCII mode's popup says (data-tip), or more. */
   text: string;
-  /** The node's colour: path, site, project, lab, work... (the panel's accent). */
+  /** The node's colour (the panel's accent): path, site, project, lab, work, or the lab's entry,
+   * attack, detect, record, neutral. */
   role: string;
   /** Where the node's box leads, for the panel's "Open →" (a tap shows the details first). */
   href?: string;
+  /** Links under the text, after `linksLead` ("On GitHub: "): where the part lives. */
+  links?: { href: string; label: string }[];
+  linksLead?: string;
 }
 
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -29,6 +33,9 @@ export function panelMarkup(key: string, items: PanelItem[]): string {
       `<div class="np-item" data-for="${esc(it.id)}" data-role="${esc(it.role)}" data-on="false" aria-hidden="true">` +
       `<p class="np-title">${esc(it.title)}${it.sub ? ` <span class="np-sub">${esc(it.sub)}</span>` : ""}</p>` +
       `<p class="np-text">${esc(it.text)}</p>` +
+      (it.links?.length
+        ? `<p class="np-links">${esc(it.linksLead ?? "")}${it.links.map((l) => `<a href="${esc(l.href)}" rel="noopener noreferrer" tabindex="-1"><code>${esc(l.label)}</code></a>`).join(", ")}</p>`
+        : "") +
       (it.href ? `<p class="np-more"><a class="np-open" href="${esc(it.href)}" tabindex="-1">Open →</a></p>` : "") +
       `</div>`,
   );

@@ -34,6 +34,12 @@
 .np-panel[data-role="project"] { --np-accent: var(--attack); }
 .np-panel[data-role="lab"] { --np-accent: var(--role-lab); }
 .np-panel[data-role="work"] { --np-accent: var(--role-work, var(--role-lab)); }
+/* The detection lab's roles. */
+.np-panel[data-role="entry"] { --np-accent: var(--role-entry); }
+.np-panel[data-role="attack"] { --np-accent: var(--attack); }
+.np-panel[data-role="detect"] { --np-accent: var(--detect); }
+.np-panel[data-role="record"] { --np-accent: var(--role-record); }
+.np-panel[data-role="neutral"] { --np-accent: var(--neutral, var(--border)); }
 
 /* Every entry in the same cell: the last fades out quickly while the next fades in just after it, so
    two never read over each other; nothing reflows. */
@@ -67,6 +73,17 @@
   max-width: 62ch;
   color: var(--text-muted);
   font-size: 0.92rem;
+}
+
+.np-links {
+  margin: 0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.np-links code {
+  font-size: 0.8rem;
 }
 
 .np-more {

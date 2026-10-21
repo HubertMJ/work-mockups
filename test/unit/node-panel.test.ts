@@ -13,7 +13,7 @@ const root = resolve(__dirname, "..", "..");
 const FILES = ["index.ts", "markup.ts", "node-panel.css"];
 const fingerprint = (dir: string) => createHash("sha256").update(FILES.map((f) => `${f}\n${readFileSync(join(dir, f), "utf8")}`).join("\n--\n")).digest("hex");
 /** Change the module in one repository, copy it to the others, and update this line in each. */
-const PINNED = "3f6fc25f9bb5f763894b5416649af9c0d0fc5953abc17469a816e6f6274541bd";
+const PINNED = "4fd03cf1e971db1194db555f0ccd810815d2424cae82ac98e085f341d21d6a39";
 
 describe("the shared module", () => {
   test("is the copy every repository carries", () => {
@@ -21,10 +21,13 @@ describe("the shared module", () => {
   });
 
   test("matches a sibling checkout's copy byte for byte, where one is beside this one", () => {
-    for (const peer of ["site-ascii", "hubertjablon.ski", "work-mockups"]) {
-      const dir = join(root, "..", peer, "src", "node-panel");
-      if (resolve(dir) === join(root, "src", "node-panel") || !existsSync(dir)) continue;
-      for (const f of FILES) expect(readFileSync(join(dir, f), "utf8"), `${peer}/src/node-panel/${f}`).toBe(readFileSync(join(root, "src", "node-panel", f), "utf8"));
+    // The web apps sit at different depths of their repositories (detection-lab's in web/), so the
+    // neighbours are looked for from a few levels up.
+    const peers = ["site-ascii", "hubertjablon.ski", "work-mockups", "detlab-b4/web", "detection-lab/web", "sdp-labfix/app/web", "self-defending-portfolio/app/web"];
+    const dirs = [1, 2, 3].flatMap((up) => peers.map((peer) => resolve(root, ...Array(up).fill(".."), ...peer.split("/"), "src", "node-panel")));
+    for (const dir of new Set(dirs)) {
+      if (dir === join(root, "src", "node-panel") || !existsSync(dir)) continue;
+      for (const f of FILES) expect(readFileSync(join(dir, f), "utf8"), `${dir}/${f}`).toBe(readFileSync(join(root, "src", "node-panel", f), "utf8"));
     }
   });
 });
@@ -64,6 +67,8 @@ describe("the panel", () => {
     expect(html.match(/class="np-item"/g)).toHaveLength(2);
     expect(html).toContain('<a class="np-open" href="/b/" tabindex="-1">Open →</a>');
     expect(html).toContain('aria-live="polite"');
+    const linked = panelMarkup("t", [{ id: "c", title: "C", text: "t", role: "record", links: [{ href: "https://example.org/a", label: "repo/a" }], linksLead: "On GitHub: " }]);
+    expect(linked).toContain('<p class="np-links">On GitHub: <a href="https://example.org/a" rel="noopener noreferrer" tabindex="-1"><code>repo/a</code></a></p>');
     const { panel, on } = page();
     expect(panel.dataset.open).toBe("false");
     expect(on()).toEqual([]);

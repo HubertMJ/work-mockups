@@ -23,6 +23,9 @@ COPY scripts/ scripts/
 COPY src/ src/
 COPY static/ static/
 COPY test/unit/ test/unit/
+# The unit tests read the server's config as text (test/unit/nginx.test.ts: the redirects, the cache
+# rules, the health check); the final stage copies the same two files into /etc/nginx.
+COPY nginx.conf security-headers.conf ./
 RUN npm run lint && npm test && npm run build
 
 # nginx-unprivileged rather than nginx because the stock image starts as root to bind :80, which

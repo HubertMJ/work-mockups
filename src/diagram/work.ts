@@ -86,8 +86,9 @@ const path = (pts: Pt[], label: string, at: Pt, anchor: WEdge["anchor"], o: Opt 
 // ---------- the vLLM deployment manager (in the mock-up's About drawer: the narrow drawing only) ----------
 
 function vllmNarrow(): WLayout {
-  const L = 20;
-  const R = 240;
+  // The columns sit left enough for the planner's trunk to leave room for a whole arrow back into it.
+  const L = 16;
+  const R = 232;
   const w = 150;
   const B: Record<string, Box> = {
     clients: bx(L, 40, w), ui: bx(R, 40, w),
@@ -265,36 +266,42 @@ function flotaWide(): WLayout {
 }
 
 function flotaNarrow(): WLayout {
-  const x = 140;
-  const w = 200;
+  const x = 150;
+  const w = 194;
   const B: Record<string, Box> = {
     owner: bx(x, 8, w),
-    hook: bx(12, 136, 106),
+    // Beside the manager with room for a whole arrow between them.
+    hook: bx(20, 136, 96),
     pm: bx(x, 136, w),
-    sections: bx(x, 222, w),
-    merger: bx(x, 308, w),
-    main: bx(x, 412, w),
-    state: bx(x, 500, w),
-    guard: bx(x, 584, w),
+    // "by name" is two-way: the gap holds both heads and line between them.
+    sections: bx(x, 244, w),
+    merger: bx(x, 330, w),
+    main: bx(x, 430, w),
+    state: bx(x, 516, w),
+    guard: bx(x, 600, w),
   };
-  const zone = bx(8, 96, 344, 280);
-  const zoneBottom = zone.y + zone.h + GAP;
+  const zone = bx(8, 96, 344, 300);
+  // The guard and the state files hang below on trunks up the left margin (the guard's outermost) and
+  // reach the sessions' own boxes: the guard the manager (under it, in the gap above the sections) and
+  // the sections (their left side, high), the state files the sections (their left side, low). No two
+  // lines cross. A stub's label sits on its shaft, 8 above the line.
+  const g = cy(B.guard);
+  const s = cy(B.state);
   return {
     view: "narrow",
     width: 360,
-    height: 652,
+    height: 664,
     boxes: B,
     zones: [{ box: zone, title: "TMUX", sub: "a session per window" }],
     edges: [
       down(B.owner, B.pm, "talks", undefined, { both: true, at: [cx(B.owner) + 8, 86] }),
       down(B.pm, B.sections, "by name", undefined, { both: true }),
       down(B.sections, B.merger, "branch"),
-      down(B.merger, B.main, "merges", undefined, { at: [cx(B.merger) + 8, 396] }),
+      down(B.merger, B.main, "merges", undefined, { at: [cx(B.merger) + 8, 416] }),
       across(B.hook, B.pm, ""),
-      // The stubs' labels: centred on the shaft between the trunk and the box (whose end carries an
-      // arrowhead on the two-way one), 8 above the line.
-      path([[x - GAP, cy(B.state)], [44, cy(B.state)], [44, zoneBottom]], "read/write", [(44 + x - GAP - HEAD) / 2, cy(B.state) - 8], "middle", { dashed: true, both: true }),
-      path([[x, cy(B.guard)], [20, cy(B.guard)], [20, zoneBottom]], "PAUSE·HARD·OK", [(20 + x) / 2, cy(B.guard) - 8], "middle"),
+      path([[x, g], [20, g], [20, 216], [x + 20, 216], [x + 20, B.pm.y + B.pm.h + GAP]], "PAUSE·HARD·OK", [(20 + x) / 2, g - 8], "middle"),
+      path([[x, g], [20, g], [20, B.sections.y + 14], [x - GAP, B.sections.y + 14]], "", [0, 0], "middle"),
+      path([[x - GAP, s], [44, s], [44, B.sections.y + 38], [x - GAP, B.sections.y + 38]], "read/write", [(44 + x - GAP - HEAD) / 2, s - 8], "middle", { dashed: true, both: true }),
     ],
   };
 }
@@ -310,7 +317,7 @@ const FLOTA: WDiagram = {
   nodes: [
     { id: "owner", label: "Owner", sub: "you, in one window", role: "path", tip: "You talk to the project manager only; it tells you what the fleet did." },
     { id: "hook", label: "PM hook", sub: "no edits", role: "project", tip: "A tool hook on the manager refuses edits and writes, and says: give it to a section." },
-    { id: "pm", label: "Project manager", sub: "plans, hands out work", role: "site", tip: "The manager session splits the work and sends it to sections by name; it cannot do the work itself." },
+    { id: "pm", label: "Project manager", sub: "plans, hands out work", role: "site", tip: "Splits the work and sends it to sections by name; it cannot do the work itself." },
     { id: "sections", label: "Sections", sub: "own tmux session each", role: "site", tip: "Each section is a session in its own window with its own scope, reporting back when done." },
     { id: "merger", label: "Merger", sub: "the only one to merge", role: "site", tip: "One session merges, so branches land on main one at a time and in order." },
     { id: "main", label: "main", sub: "the project's branch", role: "path", tip: "Where the fleet's work ends up." },

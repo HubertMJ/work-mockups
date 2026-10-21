@@ -54,3 +54,27 @@ test("/work/ sends the visitor to the landing page's projects, /work to /work/; 
   const page = await request.get("/work/vllm/");
   expect(page.headers()["content-security-policy"]).toContain("require-trusted-types-for 'script'");
 });
+
+// The console greeting (src/console-hello) stays quiet under automation, so it never shows in the
+// suites' console checks. Here automation is masked to see a person's view: once, with the commit.
+test("the console greets a person once per page load, with the build's commit, without an error", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { configurable: true, get: () => false }));
+  for (const path of ["/work/vllm/", "/work/bridge/"]) {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "log") logs.push(m.text());
+      if (m.type() === "error") errors.push(m.text());
+    });
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.goto(path);
+    await expect.poll(() => logs.filter((l) => l.includes("You opened the console")).length, path).toBe(1);
+    expect(logs.some((l) => l.includes("github.com/HubertMJ/work-mockups")), path).toBe(true);
+    expect(logs.some((l) => /Built from commit [0-9a-f]{7}\./.test(l)), path).toBe(true);
+    await page.waitForTimeout(300);
+    expect(logs.filter((l) => l.includes("You opened the console")).length, path).toBe(1);
+    expect(errors, path).toEqual([]);
+    page.removeAllListeners("console");
+    page.removeAllListeners("pageerror");
+  }
+});

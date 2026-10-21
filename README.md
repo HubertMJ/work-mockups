@@ -12,7 +12,7 @@ the real code and there is no screenshot of the real thing.
 | `/work/` | 302 to `/#projects`: the landing page's Projects section is the index of these pages |
 | `/work` | 301 to `/work/` (both redirects are paths, never `:8080`) |
 | `/work/assets/*` | content-hashed scripts, styles and fonts, cached for a year |
-| `/work/favicon.svg`, `/work/build.json` | the favicon; the commit and CI run the image was built from |
+| `/work/favicon.svg`, `/work/build.json` | the favicon; the commit and CI run the image was built from (a local build writes git's commit) |
 | `/healthz` | `ok`, for probes |
 
 Everything else on the origin (`/`, `/cluster/`, `/lab/`, `/api`) belongs to other images; this one
@@ -29,6 +29,8 @@ answers 404 there. The Gateway routes `/work/` here.
 - `src/ascii/`: the site's hidden ASCII mode, an identical copy of hubertjablon.ski's `src/ascii/`.
 - `src/node-panel/`: a diagram box's details under the drawing in the normal look, an identical copy of
   hubertjablon.ski's `src/node-panel/` (`test/unit/node-panel.test.ts` pins the copies' fingerprint).
+- `src/console-hello/`: the DevTools console's greeting, with the commit from `/work/build.json`, an
+  identical copy of hubertjablon.ski's (`test/unit/console-hello.test.ts` pins it).
 - `src/styles.css`: a copy of the site's stylesheet (tokens and components) plus the /work/ blocks.
 - `scripts/build.mjs`: the bundle; `scripts/serve.mjs`: a static server with the same headers.
 

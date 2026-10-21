@@ -12,8 +12,12 @@
  * label next to it.
  */
 
+/* The architecture drawings' traffic routes, generated from src/diagram/work.ts at build time (scripts/build.mjs). */
+@import "work-traffic.css";
 /* ASCII mode, the hidden terminal look (src/ascii): inert unless html.ascii is set. */
 @import "./ascii/ascii.css";
+/* The diagrams' node panel (src/node-panel): a box's details under the drawing, in the normal look. */
+@import "./node-panel/node-panel.css";
 /* /work/vllm/: the full-page mock-up, scoped under .vd-page and .vdemo. */
 @import "./vllm/demo/demo.css";
 
@@ -1382,6 +1386,20 @@ html.slide-out-backward body > :not(.site-header) {
 .wd-map { display: block; width: 100%; height: auto; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .wd-map--narrow { max-width: 24rem; margin-inline: auto; }
 .wd-map--wide { display: none; }
+/* The drawings' traffic, as on the landing page: a dot runs each route in turn (offset-path, so it moves
+   by transform and never by layout), the edges it passes brighten and the boxes it reaches show a halo.
+   Routes and timing come from the generated work-traffic.css. Not drawn at all where motion is not
+   wanted, nor in ASCII mode, which draws its own packets. */
+.wd-dot, .wd-glow, .wd-halo { display: none; }
+.wd-dot { fill: var(--accent); offset-rotate: 0deg; opacity: 0; filter: drop-shadow(0 0 3px var(--accent)); }
+.wd-glow { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; opacity: 0; }
+.wd-halo { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.ascii) .wd-map :is(.wd-dot, .wd-glow, .wd-halo) {
+    display: inline;
+    animation: var(--tr-name, none) var(--tr-period, 6s) linear infinite;
+  }
+}
 @media (min-width: 761px) {
   .wd-map--wide { display: block; }
   .wd-map--narrow:not(.wd-map--only) { display: none; }

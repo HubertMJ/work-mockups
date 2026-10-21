@@ -2,11 +2,14 @@
 // (ready when the log says so, measured from the same lines), the playground's stream advances token
 // by token, and once a second the telemetry takes a sample and downloads move on.
 
+import { argv } from "./config";
+import { reservedNow } from "./admission";
+import { readings, record } from "./metrics";
 import { plan } from "./planner";
-import { budget, CARD_GIB, dep, GIB, isResident, isStale, replaceDep, round2, slug, START_MS, STOP_MS, util, VISITOR_IP } from "./model";
+import { budget, CARD_GIB, cardsOf, dep, floorAt, GIB, cardsText, isResident, isStale, onCard, replaceDep, round2, slug, START_MS, STOP_MS, util, VISITOR_IP } from "./model";
 import type { Deployment, Level, LogLine, Phase, Req, State } from "./types";
 
-export const HISTORY = 180;
+export { HISTORY, usedGiB } from "./metrics";
 
 interface Step {
   at: number;
@@ -16,13 +19,25 @@ interface Step {
   effect?: (d: Deployment, now: number) => Deployment;
 }
 
-/** What the engine will report on this start: the estimate is replaced by the measurement. */
+/** What the engine will report on this start: the estimate is replaced by the measurement. An explicit
+ * --gpu-memory-utilization does not change what the model needs, only what the engine reserves. */
 export function measured(d: Deployment): number {
-  return round2(budget(d) + (d.source === "estimate" ? d.drift : 0));
+  return round2(floorAt(d, { ...d.cfg, memUtil: null }, d.maxLen) + (d.source === "estimate" ? d.drift : 0));
 }
-const kvAfter = (d: Deployment): number | null =>
-  d.kind === "embed" ? null : d.kvTokens ?? Math.round((Math.min(16, Math.max(2, d.maxSeqs / 4)) * d.maxLen) / 1000) * 1000;
+/** An explicit utilization below what the model needs leaves no room for the KV cache: the start fails. */
+const tooLow = (d: Deployment): boolean => d.cfg.memUtil !== null && d.cfg.memUtil < measured(d);
+const kvAfter = (d: Deployment): number | null => {
+  if (d.kind === "embed") return null;
+  if (d.kvTokens !== null && !isStale(d)) return d.kvTokens;
+  const fit = Math.min(16, Math.max(2, d.maxSeqs / 4)) * d.maxLen * (d.cfg.kvDtype === "fp8" ? 2 : 1) * cardsOf(d.cfg);
+  return Math.round(fit / 1000) * 1000;
+};
 const weights = (d: Deployment): number => measured(d) * CARD_GIB * (d.kind === "embed" ? 0.88 : 0.8);
+const flags = (d: Deployment): string =>
+  argv({ alias: d.alias, repo: d.model, gpu: d.gpu, maxLen: d.maxLen, maxSeqs: d.maxSeqs, lazy: d.lazy, extraAliases: [], cfg: d.cfg }, undefined, budget(d))
+    .args.filter(([f]) => !["--served-model-name", "--max-model-len", "--max-num-seqs", "--gpu-memory-utilization"].includes(f))
+    .map(([f, v]) => (v === null ? f : `${f.slice(2).replace(/-/g, "_")}=${v}`))
+    .join(" ");
 
 const finishStart = (d: Deployment, now: number): Deployment => ({
   ...d,
@@ -30,6 +45,7 @@ const finishStart = (d: Deployment, now: number): Deployment => ({
   minUtil: measured(d),
   source: "engine-log",
   profileLen: d.maxLen,
+  profileCfg: d.cfg,
   kvTokens: kvAfter(d),
   kvLen: d.maxLen,
   error: null,
@@ -38,14 +54,20 @@ const finishStart = (d: Deployment, now: number): Deployment => ({
 });
 
 const START: Step[] = [
-  { at: 0, level: "INFO", text: (d) => `manager: creating container vllm-${slug(d.alias)} on GPU ${d.gpu}, model cache mounted read-only` },
-  { at: 450, level: "INFO", text: (d) => `vLLM API server: model=${d.model} max_model_len=${d.maxLen} max_num_seqs=${d.maxSeqs}` },
+  { at: 0, level: "INFO", text: (d) => `manager: creating container vllm-${slug(d.alias)} from ${d.cfg.image} on ${cardsText(d)}, model cache mounted read-only` },
+  { at: 450, level: "INFO", text: (d) => `vLLM API server: model=${d.model} max_model_len=${d.maxLen} max_num_seqs=${d.maxSeqs}${flags(d) ? ` ${flags(d)}` : ""}` },
   { at: 1000, level: "INFO", text: () => "Loading safetensors checkpoint shards: 100% completed" },
   { at: 1700, level: "INFO", text: (d) => `Model loading took ${weights(d).toFixed(2)} GiB and ${(weights(d) / 6.5).toFixed(1)} seconds` },
   {
     at: 2400,
     level: "INFO",
     text: (d) => `Memory profiling: weights ${weights(d).toFixed(2)} GiB, KV cache ${(measured(d) * CARD_GIB - weights(d) - 1.2).toFixed(2)} GiB, peak activation 1.20 GiB`,
+  },
+  {
+    at: 2450,
+    level: "ERROR",
+    text: (d) => (tooLow(d) ? `No memory left for the KV cache at gpu_memory_utilization=${util(d.cfg.memUtil ?? 0)}: the model needs about ${util(measured(d))}. Raise it, or clear it to use the measured floor.` : ""),
+    effect: (d) => (tooLow(d) ? { ...d, status: "Error", phase: null, error: `engine start failed: gpu-memory-utilization ${util(d.cfg.memUtil ?? 0)} is below the ${util(measured(d))} the model needs` } : d),
   },
   {
     at: 2900,
@@ -73,7 +95,7 @@ const STOP: Step[] = [
   {
     at: STOP_MS,
     level: "INFO",
-    text: (d) => `manager: container removed; GPU ${d.gpu} budget ${util(budget(d))} released`,
+    text: (d) => `manager: container removed; ${cardsText(d)} budget ${util(budget(d))} released`,
     effect: (d) => ({ ...d, status: "Stopped", phase: null }),
   },
 ];
@@ -83,8 +105,8 @@ const RESTART: Step[] = [
   {
     at: STOP_MS,
     level: "INFO",
-    text: (d) => `manager: container removed${d.pending ? `; applying max_model_len=${d.pending.maxLen} max_num_seqs=${d.pending.maxSeqs}` : ""}`,
-    effect: (d) => (d.pending ? { ...d, status: "Starting", maxLen: d.pending.maxLen, maxSeqs: d.pending.maxSeqs, pending: null } : { ...d, status: "Starting" }),
+    text: (d) => `manager: container removed${d.pending ? `; applying max_model_len=${d.pending.maxLen} max_num_seqs=${d.pending.maxSeqs}${d.pending.cfg === d.cfg ? "" : " and the new engine settings"}` : ""}`,
+    effect: (d) => (d.pending ? { ...d, status: "Starting", maxLen: d.pending.maxLen, maxSeqs: d.pending.maxSeqs, cfg: d.pending.cfg, pending: null } : { ...d, status: "Starting" }),
   },
   ...START.map((s) => ({ ...s, at: s.at + STOP_MS })),
 ];
@@ -100,29 +122,9 @@ export function pushLog(d: Deployment, line: LogLine): Deployment {
   return { ...d, log: [...d.log, line].slice(-200) };
 }
 
-/** Memory a card holds right now, GiB: the floors of what runs, ramping while it loads or unloads. */
-export function usedGiB(s: State, gpu: number): number {
-  let n = 0;
-  for (const d of s.deps) {
-    if (d.gpu !== gpu || !isResident(d)) continue;
-    const full = budget(d) * CARD_GIB;
-    const p = d.phase;
-    if (!p) n += d.minUtil * CARD_GIB;
-    else {
-      const e = Math.max(0, s.now - p.at);
-      const down = (x: number): number => full * Math.max(0, 1 - x / STOP_MS);
-      const up = (x: number): number => full * Math.min(1, Math.max(0, x) / START_MS);
-      if (p.kind === "stop") n += down(e);
-      else if (p.kind === "start") n += s.now < p.at ? 0 : up(e);
-      else n += e < STOP_MS ? down(e) : up(e - STOP_MS);
-    }
-  }
-  return n;
-}
-
 /** Budget a card has promised: what runs, plus the full floor of whatever is starting. */
 export function budgetOn(s: State, gpu: number): number {
-  return s.deps.filter((d) => d.gpu === gpu && isResident(d)).reduce((n, d) => n + budget(d), 0);
+  return s.deps.filter((d) => onCard(d, gpu) && isResident(d)).reduce((n, d) => n + budget(d), 0);
 }
 
 function advanceDeps(s: State, now: number): State {
@@ -143,9 +145,11 @@ function advanceDeps(s: State, now: number): State {
         d = st.effect(d, now);
         if (before.status === "Starting" && d.status === "Running") {
           const was = before.source === "estimate" || isStale(before) ? `, was ${util(budget(before))} (${isStale(before) ? "stale, re-estimated" : "estimate"})` : "";
-          const msg = `${d.alias} is running on GPU ${d.gpu}: measured ${util(d.minUtil)} from the engine log${was}.`;
+          const msg = `${d.alias} is running on ${cardsText(d)}: measured ${util(d.minUtil)} from the engine log${was}.`;
           out = note(out, "info", msg);
-        } else if (before.status === "Stopping" && d.status === "Stopped") out = note(out, "info", `${d.alias} stopped; GPU ${d.gpu} released ${util(budget(d))}.`);
+        } else if (before.status === "Stopping" && d.status === "Stopped") out = note(out, "info", `${d.alias} stopped; ${cardsText(d)} released ${util(budget(d))}.`);
+        else if (before.status === "Starting" && d.status === "Error") out = note(out, "error", `${d.alias} failed to start: ${d.error ?? "engine error"}.`);
+        if (!d.phase) break;
       }
     }
     if (d.phase) d = step >= script.length ? { ...d, phase: null } : { ...d, phase: { ...phase, step } };
@@ -185,35 +189,21 @@ function advanceStream(s: State, now: number): State {
   return logRequest(done, { t: st.t0, alias: st.alias, path: st.path, status: 200, ms: now - st.t0, cold: st.cold, prompt: st.prompt, output: st.tokens.join("") });
 }
 
-/** One telemetry sample for card `g`: utilization %, memory GiB, temperature °C. */
-export function sample(s: State, g: number, prevUtil: number, prevTemp: number, r: () => number): [number, number, number] {
-  let target = 0;
-  for (const d of s.deps) {
-    if (d.gpu !== g) continue;
-    if (d.status === "Running") target += d.load * (0.88 + 0.24 * r());
-    else if (d.status === "Starting" || d.status === "Stopping") target += 0.22;
-  }
-  if (s.stream?.phase === "streaming" && dep(s, s.stream.alias)?.gpu === g) target += 0.35;
-  const noise = (r() - 0.5) * 2;
-  const u = Math.min(100, Math.max(0, prevUtil * 0.8 + Math.min(1, target) * 100 * 0.2 + (target > 0 ? noise : 0)));
-  const temp = prevTemp + (36 + 0.36 * u - prevTemp) * 0.12 + (r() - 0.5) * 0.3;
-  return [Math.round(u * 10) / 10, Math.round(usedGiB(s, g) * 10) / 10, Math.round(temp * 10) / 10];
+function sampleAll(s: State, at: number, r: () => number): State {
+  return { ...s, telemetry: record(s.telemetry, readings(s, s.telemetry, at, r), at, s.deps) };
 }
 
-function sampleAll(s: State, at: number, r: () => number): State {
-  const t = s.telemetry;
-  const util: number[][] = [];
-  const vram: number[][] = [];
-  const temp: number[][] = [];
-  for (const g of s.gpus) {
-    const u0 = t.util[g.index].at(-1) ?? 0;
-    const t0 = t.temp[g.index].at(-1) ?? 36;
-    const [u, v, c] = sample(s, g.index, u0, t0, r);
-    util.push([...t.util[g.index], u].slice(-HISTORY));
-    vram.push([...t.vram[g.index], v].slice(-HISTORY));
-    temp.push([...t.temp[g.index], c].slice(-HISTORY));
+/** Lazy deployments idle for longer than their timeout are stopped, unless pinned, booked now or serving. */
+function idleStops(s: State): State {
+  let out = s;
+  for (const d of s.deps) {
+    if (d.status !== "Running" || d.phase || !d.lazy || d.pinned || reservedNow(s, d.alias)) continue;
+    if (s.stream?.alias === d.alias && (s.stream.phase === "cold" || s.stream.phase === "streaming")) continue;
+    if (s.now - d.lastUsed < d.cfg.idleMin * 60_000) continue;
+    out = replaceDep(out, d.alias, (x) => pushLog({ ...x, status: "Stopping", phase: { kind: "stop", at: s.now, step: 0, why: "idle" } }, { t: s.now, level: "INFO", text: `manager: idle for ${d.cfg.idleMin} min (lazy), stopping` }));
+    out = note(out, "info", `${d.alias} stopped: idle for ${d.cfg.idleMin} min (lazy).`);
   }
-  return { ...s, telemetry: { at, util, vram, temp } };
+  return out;
 }
 
 function advanceDownloads(s: State, dt: number, r: () => number): State {
@@ -240,6 +230,7 @@ export function tick(s0: State, now: number, r: () => number): State {
   let s: State = { ...s0, now };
   s = advanceDeps(s, now);
   s = advanceStream(s, now);
+  s = idleStops(s);
   if (now - s.telemetry.at >= 1000) {
     const dt = Math.min(now - s.telemetry.at, 5000);
     s = advanceDownloads(s, dt, r);

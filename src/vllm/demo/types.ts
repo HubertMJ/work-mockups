@@ -22,6 +22,55 @@ export interface Phase {
   why: string;
 }
 
+/** Engine settings beyond length and batch width: what `vllm serve` is started with (config.ts builds the argv). */
+export interface EngineConfig {
+  /** Cards one layer is split across, and stages the layer stack is cut into; the deployment holds tp × pp cards from `gpu` up. */
+  tp: number;
+  pp: number;
+  image: string;
+  /** Explicit --gpu-memory-utilization; null leaves it to the scheduler, which passes the measured floor. */
+  memUtil: number | null;
+  /** Null: the engine's own default. */
+  maxBatched: number | null;
+  kvDtype: "auto" | "fp8";
+  blockSize: 16 | 32;
+  swapGiB: number;
+  offloadGiB: number;
+  dtype: "auto" | "bfloat16" | "float16";
+  quant: "none" | "fp8" | "bitsandbytes";
+  prefixCaching: boolean;
+  chunkedPrefill: boolean;
+  eager: boolean;
+  remoteCode: boolean;
+  toolParser: string;
+  autoTools: boolean;
+  thinkParser: string;
+  templatePath: string;
+  /** A JSON object as typed, "" for none; validated before it is saved. */
+  chatKwargs: string;
+  generationConfig: "auto" | "vllm";
+  spec: { method: "none" | "ngram" | "draft"; tokens: number; draft: string };
+  lora: { on: boolean; max: number; rank: number; modules: string[] };
+  env: [string, string][];
+  customFlags: string[];
+  coldStartS: number;
+  idleMin: number;
+}
+
+/** What the estimate knows about the weights, copied from the cache entry when the deployment is made. */
+export interface ModelMem {
+  weightsGiB: number;
+  kvPerK: number;
+  precision: "bf16" | "fp8";
+}
+
+/** Edits a running engine has not picked up yet. */
+export interface Pending {
+  maxLen: number;
+  maxSeqs: number;
+  cfg: EngineConfig;
+}
+
 export interface Deployment {
   alias: string;
   model: string;
@@ -36,6 +85,10 @@ export interface Deployment {
   source: UtilSource;
   /** The max length `minUtil` was taken at; when it differs from maxLen the profile is stale. */
   profileLen: number;
+  /** The settings `minUtil` was taken at; a memory-relevant change makes the profile stale too. */
+  profileCfg: EngineConfig;
+  cfg: EngineConfig;
+  mem: ModelMem;
   /** What the engine will measure above the estimate on its first start (the simulation's truth). */
   drift: number;
   maxLen: number;
@@ -44,7 +97,7 @@ export interface Deployment {
   kvTokens: number | null;
   kvLen: number;
   /** Edited parameters a running engine has not picked up yet ("Restart to apply"). */
-  pending: { maxLen: number; maxSeqs: number } | null;
+  pending: Pending | null;
   extraAliases: string[];
   error: string | null;
   /** The last refused start, shown on the card until the next start or a dismiss. */
@@ -109,6 +162,7 @@ export interface CachedModel {
   maxCtx: number;
   /** KV cache per 1k tokens of context, GiB. */
   kvPerK: number;
+  precision: "bf16" | "fp8";
   kind: "generate" | "embed";
   cached: boolean;
 }
@@ -130,11 +184,60 @@ export interface Stream {
   endedAt: number | null;
 }
 
+/** One metric over time: the last HISTORY samples at 1 s, and a longer ring of 15 s averages. */
+export interface Series {
+  fine: number[];
+  coarse: number[];
+}
+
+export interface CardSeries {
+  util: Series;
+  vram: Series;
+  temp: Series;
+  power: Series;
+  sm: Series;
+  memClock: Series;
+  fan: Series;
+}
+
+export interface HostSeries {
+  cpu: Series;
+  cpuTemp: Series;
+  ram: Series;
+  load: Series;
+  diskRead: Series;
+  diskWrite: Series;
+  netRx: Series;
+}
+
+/** What one engine's /metrics endpoint reports, sampled once a second (zeros while it is down). */
+export interface EngineSeries {
+  reqRate: Series;
+  promptTps: Series;
+  genTps: Series;
+  ttft50: Series;
+  ttft95: Series;
+  itl50: Series;
+  itl95: Series;
+  e2e50: Series;
+  e2e95: Series;
+  running: Series;
+  waiting: Series;
+  kvUsage: Series;
+  prefixHit: Series;
+  preempt: Series;
+  accept: Series;
+}
+
 export interface Telemetry {
   at: number;
-  util: number[][];
-  vram: number[][];
-  temp: number[][];
+  /** Samples taken so far: every 15th closes a coarse point. */
+  n: number;
+  gpus: CardSeries[];
+  host: HostSeries;
+  engines: Record<string, EngineSeries>;
+  /** Preemptions since each engine started, as the counter reads. */
+  preemptTotal: Record<string, number>;
 }
 
 export interface Notice {

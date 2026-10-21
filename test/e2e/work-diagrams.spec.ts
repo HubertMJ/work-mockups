@@ -121,3 +121,115 @@ for (const p of PAGES) {
     expect(await tip.evaluate((t) => !document.querySelector("dialog[open]") || !!t.closest("dialog[open]"))).toBe(true);
   });
 }
+
+// The traffic: a dot runs each route in turn, as on the landing page. It moves by transform, so the page
+// never moves with it; with reduced motion nothing of it is drawn; in ASCII mode the drawing's own
+// packets take over.
+for (const p of PAGES) {
+  test(`the ${p.id} drawing's traffic runs, and the page stays still`, async ({ page }) => {
+    await page.goto(p.path);
+    if (p.open) await openAbout(page);
+    const shown = page.locator(`svg.wd-map[data-diagram="${p.id}"]:visible`);
+    const state = () =>
+      shown.evaluate((svg) => {
+        const dots = [...svg.querySelectorAll<SVGCircleElement>(".wd-dot")];
+        return { dots: dots.length, drawn: dots.every((d) => getComputedStyle(d).display !== "none"), running: dots.every((d) => d.getAnimations().some((a) => a.playState === "running")), time: Number(dots[0].getAnimations()[0]?.currentTime ?? 0) };
+      });
+    const before = await state();
+    expect(before.dots).toBeGreaterThan(0);
+    expect(before).toMatchObject({ drawn: true, running: true });
+    const still = () => page.evaluate(() => [document.documentElement.scrollHeight, scrollY, document.querySelector(".vd-about")?.scrollHeight ?? 0]);
+    const at0 = await still();
+    await page.waitForTimeout(800);
+    expect((await state()).time).toBeGreaterThan(before.time);
+    expect(await still()).toEqual(at0);
+  });
+}
+
+test.describe("with reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+  test("no drawing's traffic is drawn", async ({ page }) => {
+    for (const p of PAGES) {
+      await page.goto(p.path);
+      if (p.open) await openAbout(page);
+      expect(await page.locator(".wd-dot, .wd-glow, .wd-halo").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length), p.id).toBe(0);
+    }
+  });
+});
+
+test("in ASCII mode the SVG's dots stay off: the character drawing runs its own packets", async ({ page }) => {
+  await page.goto("/work/bridge/?ascii=1");
+  await expect(page.locator("pre.ascii-dg:not([hidden])")).toHaveCount(1);
+  expect(await page.locator(".wd-dot").evaluateAll((els) => els.filter((e) => getComputedStyle(e).display !== "none").length)).toBe(0);
+});
+
+// In the normal look a box's details slide out under its drawing (the node panel, src/node-panel), as
+// ASCII mode's popups do beside the box. The slot is reserved from the start: nothing moves.
+for (const p of PAGES) {
+  test(`the ${p.id} drawing shows a box's details under it, and nothing moves`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
+    });
+    await page.goto(p.path);
+    if (p.open) await openAbout(page);
+    const fig = page.locator(`figure:has(svg.wd-map[data-diagram="${p.id}"])`);
+    const panel = fig.locator(".np-panel");
+    const node = (id: string) => fig.locator(`svg.wd-map:visible [data-node="${id}"]`);
+    const still = () => page.evaluate(() => [document.documentElement.scrollHeight, Math.round(scrollY), document.querySelector(".vd-drawer .vd-dialog__body")?.scrollHeight ?? 0, Math.round(document.querySelector(".vd-drawer .vd-dialog__body")?.scrollTop ?? 0)]);
+    // Focus as Tab would, without the browser scrolling the box into view: the panel is what is measured.
+    const focus = (id: string) => node(id).evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
+    const id = (await node(p.first.toLowerCase()).count()) ? p.first.toLowerCase() : ({ Webhook: "webhook", Merger: "merger", Gateway: "gateway" } as Record<string, string>)[p.first];
+    const at0 = await still();
+    await expect(panel).toHaveAttribute("data-open", "false");
+    await expect(node(id)).toHaveAttribute("role", "button");
+    await focus(id);
+    await expect(panel).toHaveAttribute("data-open", "true");
+    await expect(fig.locator(".np-item[data-on='true'] .np-text")).toContainText(p.tip);
+    expect(await still()).toEqual(at0);
+    // The box hugs the entry that shows, while the slot keeps the tallest entry's height: the shortest
+    // entry sits in a box shorter than the slot.
+    const sizes = () =>
+      fig.evaluate((f) => {
+        const hgt = (el: Element | null) => el?.getBoundingClientRect().height ?? 0;
+        const items = [...f.querySelectorAll<HTMLElement>(".np-item")];
+        const short = items.reduce((a, b) => (hgt(b) < hgt(a) ? b : a));
+        return { box: hgt(f.querySelector(".np-box")), item: hgt(f.querySelector(".np-item[data-on='true']")), slot: hgt(f.querySelector(".np-slot")), shortest: short.dataset.for ?? "", spread: Math.max(...items.map(hgt)) - hgt(short) };
+      });
+    await expect.poll(async () => { const z = await sizes(); return Math.abs(z.box - z.item) < 2; }).toBe(true);
+    const short = (await sizes()).shortest;
+    await focus(short);
+    // Where every entry is as tall as the next (the vLLM drawer's, two lines each), the box is the slot.
+    await expect.poll(async () => { const z = await sizes(); return Math.abs(z.box - z.item) < 2 && (z.spread < 10 || z.box < z.slot - 10); }).toBe(true);
+    expect(await still()).toEqual(at0);
+    await focus(id);
+    const other = await fig.locator("svg.wd-map:visible [data-node]").evaluateAll((ns, me) => ns.map((n) => n.getAttribute("data-node")).find((n) => n !== me) as string, id);
+    if (test.info().project.name === "desktop") {
+      await node(other).locator("rect").hover();
+    } else {
+      await node(other).locator("rect").tap();
+    }
+    await expect(fig.locator(".np-item[data-on='true']")).toHaveAttribute("data-for", other);
+    // Heights only here: Playwright scrolls the other box into view before it points at it or taps it.
+    const at = await still();
+    expect([at[0], at[2]]).toEqual([at0[0], at0[2]]);
+    const at1 = await still();
+    // Escape closes the panel only: in the vLLM page's drawer, the drawer stays open.
+    await page.keyboard.press("Escape");
+    await expect(panel).toHaveAttribute("data-open", "false");
+    if (p.open) await expect(page.getByRole("dialog", { name: "About this mock-up" })).toBeVisible();
+    expect(await still()).toEqual(at1);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("the node panel shows at once with reduced motion, and is not there in ASCII mode", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/work/flota/");
+  await page.locator('svg.wd-map:visible [data-node="merger"]').evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
+  await expect(page.locator(".np-panel")).toHaveAttribute("data-open", "true");
+  expect(await page.locator(".np-panel").evaluate((p) => getComputedStyle(p).transitionDuration.split(",").every((d) => parseFloat(d) === 0))).toBe(true);
+  await page.goto("/work/flota/?ascii=1");
+  await expect(page.locator("html")).toHaveClass(/ascii/);
+  expect(await page.locator(".np-slot").evaluate((s) => getComputedStyle(s).display)).toBe("none");
+});

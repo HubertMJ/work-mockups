@@ -3,7 +3,7 @@
 // bookings that overlap, and its own deployment under the ceiling. Pins, memory-affecting edits and
 // deletes go through the same check and are refused (409) with the booking they would break.
 
-import { CEILING, dep, planBudget, replaceDep, span, util, dayHm } from "./model";
+import { cards, CEILING, dep, onCard, planBudget, replaceDep, span, util, dayHm } from "./model";
 import type { Conflict, Deployment, Reservation, State } from "./types";
 
 interface Part {
@@ -13,22 +13,27 @@ interface Part {
 }
 export type Fit = { ok: true } | { ok: false; at: number; gpu: number; need: number; parts: Part[] };
 
-/** Does `d` fit its card over [start, end) next to the bookings already admitted? */
+/** Does `d` fit its cards over [start, end) next to the bookings already admitted? */
 export function fitWindow(s: State, admitted: Reservation[], d: Deployment, start: number, end: number): Fit {
-  const onCard = (r: Reservation): boolean => dep(s, r.alias)?.gpu === d.gpu && r.alias !== d.alias;
-  const others = admitted.filter((r) => r.end > start && r.start < end && onCard(r));
-  const points = [start, ...others.map((r) => r.start).filter((t) => t > start && t < end)];
-  for (const t of points) {
-    const parts = new Map<string, Part>();
-    for (const p of s.deps) if (p.gpu === d.gpu && p.pinned && p.alias !== d.alias) parts.set(p.alias, { alias: p.alias, util: planBudget(p), why: "pinned" });
-    for (const r of others) {
+  for (const g of cards(d)) {
+    const onG = (r: Reservation): boolean => {
       const p = dep(s, r.alias);
-      if (p && r.start <= t && t < r.end && !parts.has(p.alias)) parts.set(p.alias, { alias: p.alias, util: planBudget(p), why: `reservation ${r.name}` });
+      return !!p && onCard(p, g) && r.alias !== d.alias;
+    };
+    const others = admitted.filter((r) => r.end > start && r.start < end && onG(r));
+    const points = [start, ...others.map((r) => r.start).filter((t) => t > start && t < end)];
+    for (const t of points) {
+      const parts = new Map<string, Part>();
+      for (const p of s.deps) if (onCard(p, g) && p.pinned && p.alias !== d.alias) parts.set(p.alias, { alias: p.alias, util: planBudget(p), why: "pinned" });
+      for (const r of others) {
+        const p = dep(s, r.alias);
+        if (p && r.start <= t && t < r.end && !parts.has(p.alias)) parts.set(p.alias, { alias: p.alias, util: planBudget(p), why: `reservation ${r.name}` });
+      }
+      parts.set(d.alias, { alias: d.alias, util: planBudget(d), why: d.source === "estimate" ? "this booking, estimate" : "this booking" });
+      const list = [...parts.values()];
+      const need = list.reduce((n, p) => n + p.util, 0);
+      if (need > CEILING + 1e-9) return { ok: false, at: t, gpu: g, need, parts: list };
     }
-    parts.set(d.alias, { alias: d.alias, util: planBudget(d), why: d.source === "estimate" ? "this booking, estimate" : "this booking" });
-    const list = [...parts.values()];
-    const need = list.reduce((n, p) => n + p.util, 0);
-    if (need > CEILING + 1e-9) return { ok: false, at: t, gpu: d.gpu, need, parts: list };
   }
   return { ok: true };
 }
@@ -116,8 +121,8 @@ export function editConflict(before: State, after: State, alias: string): Confli
   if (!broke || !d) return null;
   return {
     action: `Edit ${alias}`,
-    message: `The new max length raises ${alias}'s floor to ${util(planBudget(d))}, which leaves no room for reservation ${broke.name} (${span(broke.start, broke.end)}). ${broke.reason ?? ""}`.trim(),
-    remedy: "Keep the current max length, or delete or move that reservation first.",
+    message: `The new settings raise ${alias}'s floor to ${util(planBudget(d))}, which leaves no room for reservation ${broke.name} (${span(broke.start, broke.end)}). ${broke.reason ?? ""}`.trim(),
+    remedy: "Keep the current max length and memory settings, or delete or move that reservation first.",
     item: broke,
   };
 }

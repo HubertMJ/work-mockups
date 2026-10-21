@@ -3,7 +3,7 @@
 // instances, least recently used first; pinned and reserved ones never go. If it would not fit even
 // then, it is refused before anything is stopped.
 
-import { budget, CEILING, isResident, util } from "./model";
+import { budget, cards, CEILING, isResident, onCard, util } from "./model";
 import type { Deployment, State } from "./types";
 
 export type Admission =
@@ -20,7 +20,7 @@ const busy = (s: State, alias: string): boolean => !!s.stream && s.stream.alias 
 /** What admission may stop on a card, in the order it would: idle lazy instances, least recently used first. */
 export function evictable(s: State, gpu: number, except?: string): Deployment[] {
   return s.deps
-    .filter((d) => d.gpu === gpu && d.alias !== except && d.status === "Running" && d.lazy && !d.pinned && !reservedNow(s, d.alias) && !busy(s, d.alias))
+    .filter((d) => onCard(d, gpu) && d.alias !== except && d.status === "Running" && d.lazy && !d.pinned && !reservedNow(s, d.alias) && !busy(s, d.alias))
     .sort((a, b) => a.lastUsed - b.lastUsed);
 }
 
@@ -31,9 +31,9 @@ const why = (s: State, d: Deployment): string =>
 export function admitOnCard(s: State, gpu: number, need: number, except?: string): Admission {
   const card = s.gpus[gpu];
   if (card.blocked) return { ok: false, code: 503, reason: `GPU ${gpu} is blocked for new loads`, detail: `Blocked by the operator: ${card.blocked}. Allow loads again to start here.`, evictable: 0 };
-  const starting = s.deps.find((d) => d.gpu === gpu && d.status === "Starting" && d.alias !== except);
+  const starting = s.deps.find((d) => onCard(d, gpu) && d.status === "Starting" && d.alias !== except);
   if (starting) return { ok: false, code: 503, reason: `GPU ${gpu} has a start in progress`, detail: `${starting.alias} is starting; one start at a time per card. Retry when it is up.`, evictable: 0 };
-  const residents = s.deps.filter((d) => d.gpu === gpu && d.alias !== except && isResident(d));
+  const residents = s.deps.filter((d) => onCard(d, gpu) && d.alias !== except && isResident(d));
   const load = residents.reduce((n, d) => n + budget(d), 0);
   if (load + need <= CEILING + 1e-9) return { ok: true, evict: [], load, after: load + need };
   const cand = evictable(s, gpu, except);
@@ -55,9 +55,24 @@ export function admitOnCard(s: State, gpu: number, need: number, except?: string
   };
 }
 
+/** The same check on every card a split deployment holds: all of them admit it, or the first that cannot refuses. */
+export function admitCards(s: State, gpus: number[], need: number, except?: string): Admission {
+  const evict = new Set<string>();
+  let load = 0;
+  let after = 0;
+  for (const g of gpus) {
+    const a = admitOnCard(s, g, need, except);
+    if (!a.ok) return a;
+    for (const e of a.evict) evict.add(e);
+    load = Math.max(load, a.load);
+    after = Math.max(after, a.after);
+  }
+  return { ok: true, evict: [...evict], load, after };
+}
+
 /** Admission for a deployment's own start. */
 export function admit(s: State, alias: string): Admission {
   const d = s.deps.find((x) => x.alias === alias);
   if (!d) return { ok: false, code: 503, reason: "no such deployment", detail: alias, evictable: 0 };
-  return admitOnCard(s, d.gpu, budget(d), d.alias);
+  return admitCards(s, cards(d), budget(d), d.alias);
 }

@@ -41,7 +41,7 @@
   color-scheme: dark;
   position: relative;
   min-height: 52rem;
-  padding: clamp(12px, 2vw, 24px);
+  padding: clamp(16px, 2vw, 24px);
   border: 1px solid var(--vd-line);
   border-radius: 14px;
   background: var(--vd-bg);
@@ -77,7 +77,7 @@ body.vd-page { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .vd-main { display: flex; min-height: 0; outline: none; }
 .vdemo--full { flex: 1; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-width: 0; min-height: 0; padding-bottom: 0; border: 0; border-radius: 0; }
 .vdemo--full .vd-top { margin-bottom: 0.75rem; }
-.vdemo--full .vd-panels { min-height: 0; overflow: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(12px, 2vw, 24px)); padding: 0 clamp(12px, 2vw, 24px) 24px; }
+.vdemo--full .vd-panels { min-height: 0; overflow: auto; overscroll-behavior: contain; margin: 0 calc(-1 * clamp(16px, 2vw, 24px)); padding: 0 clamp(16px, 2vw, 24px) 24px; }
 .vdemo--full .vd-tabpanel { min-height: 0; }
 @media (max-width: 560px) {
   .vdemo--full .vd-top .vd-brand .vd-faint { display: none; }

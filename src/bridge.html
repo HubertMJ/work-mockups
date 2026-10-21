@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Git forge ⇄ AI agent bridge · Hubert Jabłoński</title>
+<meta name="description" content="A self-hosted git forge that hands issues and pull requests to an AI coding agent: webhook, queue, isolated runs, usage gating and multi-pass review. Built and in daily use; described here without its code.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="/work/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/work/assets/{{styles.css}}">
+<script src="/work/assets/{{theme.js}}"></script>
+<script type="module" src="/work/assets/{{work.js}}"></script>
+</head>
+<body data-banner="Forge bridge">
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap site-header__inner">
+    <a class="brand" href="/" aria-label="Hubert Jabłoński, home">
+      <span class="brand__mark" aria-hidden="true">&gt;_</span>
+      <span class="brand__name">hubertjablon<span class="brand__dot">.</span>ski</span>
+    </a>
+    <nav class="site-nav" aria-label="Sections">
+      <ul>
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="https://github.com/HubertMJ" rel="noopener noreferrer">GitHub</a></li>
+      </ul>
+    </nav>
+    <div class="site-header__tools">
+      <button type="button" class="theme-toggle" id="theme-toggle" hidden aria-label="Switch theme">
+        <span class="theme-toggle__icon" aria-hidden="true"></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" tabindex="-1" class="landing work-page">
+  <section class="hero landing-hero work-hero" id="top" aria-labelledby="page-title">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h1 id="page-title">A git forge that hands work to an AI agent</h1>
+      <p class="hero__lead">People on a self-hosted git forge ask for work where they already are. They mention the agent in an issue or a pull request and the answer comes back in the same thread, as a comment or a pull request. It runs unattended on one host and spreads the work over several subscription accounts.</p>
+      <p class="work-note">Built and in daily use. The code isn't public: this is a description written for this site.</p>
+    </div>
+  </section>
+
+  <section class="section" id="pipeline" aria-labelledby="pipeline-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">The pipeline</p>
+        <h2 id="pipeline-title">From a mention to a pull request</h2>
+      </header>
+      <figure class="wd-figure">
+        {{diagram.bridge.wide}}
+        {{diagram.bridge.narrow}}
+        <figcaption class="small">Blue: on the forge and on the way in. Green: the work itself. Orange: the usage gate. Violet: what keeps a run resumable and visible. Each step in more detail:</figcaption>
+      </figure>
+      <ol class="pipeline" role="list">
+        <li><strong>Mention</strong><span><code>@claude</code> in an issue or PR, or a new issue in an opted-in repository.</span></li>
+        <li><strong>Webhook</strong><span>Signature verified, deliveries de-duplicated, the bot's own comments ignored.</span></li>
+        <li><strong>Who may ask</strong><span>An allowlist, the repo's collaborators (checked live) or anyone. A failed check refuses.</span></li>
+        <li><strong>Mode</strong><span>Review, architect, security, triage, implement… from a verb, or from a classifier that says what it assumed.</span></li>
+        <li><strong>Queue</strong><span>Workers behind a STOP switch; work held back by limits waits with a not-before time instead of being dropped.</span></li>
+        <li><strong>Isolated run</strong><span>A fresh checkout, the agent headless with a tool allowlist, a turn cap, a timeout and a budget; secrets stripped.</span></li>
+        <li><strong>Quality passes</strong><span>The author, then reviewers with fresh context, then repair rounds while the defect count still falls.</span></li>
+        <li><strong>Answer</strong><span>A comment and/or a PR on a <code>claude/*</code> branch, never straight to the default branch.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="limits" aria-labelledby="limits-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">Safety and limits</p>
+        <h2 id="limits-title">What keeps it in bounds</h2>
+      </header>
+      <ul class="work-list">
+        <li><strong>Usage gating.</strong> It reads the 5-hour and 7-day usage windows, defers jobs above a threshold and resumes them after the reset. Work it starts on its own has tighter ceilings, by day and night; people are not throttled that way.</li>
+        <li><strong>A budget per issue.</strong> Every turn counts against the issue, added after one issue burned through its money while staying under every per-run cap.</li>
+        <li><strong>Account pools.</strong> Calls go through a multi-account proxy that can move a session between accounts at a limit, and workloads are split into pools so one cannot eat everyone's window.</li>
+        <li><strong>Checkpoints.</strong> Near a limit, the working tree is snapshotted to a work-in-progress branch every few minutes, so a run killed by a limit or a restart resumes instead of starting over.</li>
+        <li><strong>Visibility that fails closed.</strong> A status endpoint and page, metrics and a run history; a separate portal streams runs live and shows each person only what the forge lets them see with their own token.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="value" aria-labelledby="value-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">For a team</p>
+        <h2 id="value-title">What it gives a team</h2>
+      </header>
+      <div class="prose"><p>Anyone who can file a ticket can hand off a review, a triage or an implementation without installing anything or learning commands. Results arrive in the normal review flow, cost and safety are enforced in one place, and work survives limits and restarts, so long runs can go overnight.</p></div>
+      <p class="section__more"><a href="/#projects">Back to all projects</a></p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap site-footer__inner">
+    <p><a href="/">All projects</a> · <a href="https://github.com/HubertMJ">GitHub</a></p>
+    <p class="small">No cookies, no trackers, no third-party requests.</p>
+  </div>
+</footer>
+</body>
+</html>

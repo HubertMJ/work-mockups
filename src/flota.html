@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flota · Hubert Jabłoński</title>
+<meta name="description" content="A fleet of AI coding sessions for one project: a manager that delegates, sections in their own terminals, and a usage-limit guard.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="/work/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/work/assets/{{styles.css}}">
+<script src="/work/assets/{{theme.js}}"></script>
+<script type="module" src="/work/assets/{{work.js}}"></script>
+</head>
+<body data-banner="Flota">
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap site-header__inner">
+    <a class="brand" href="/" aria-label="Hubert Jabłoński, home">
+      <span class="brand__mark" aria-hidden="true">&gt;_</span>
+      <span class="brand__name">hubertjablon<span class="brand__dot">.</span>ski</span>
+    </a>
+    <nav class="site-nav" aria-label="Sections">
+      <ul>
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="https://github.com/HubertMJ" rel="noopener noreferrer">GitHub</a></li>
+      </ul>
+    </nav>
+    <div class="site-header__tools">
+      <button type="button" class="theme-toggle" id="theme-toggle" hidden aria-label="Switch theme">
+        <span class="theme-toggle__icon" aria-hidden="true"></span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" tabindex="-1" class="landing work-page">
+  <section class="hero landing-hero work-hero" id="top" aria-labelledby="page-title">
+    <div class="wrap">
+      <p class="eyebrow">Tool</p>
+      <h1 id="page-title">Flota: a fleet of AI coding sessions for one project</h1>
+      <p class="hero__lead">A project manager session hands out work; section sessions do it, each in its own terminal, addressed by name. A guard with no model watches the account's usage limits, and the manager is technically unable to do the work itself.</p>
+      <p class="work-note">Built and used on a real project, then rewritten from scratch as a general tool. The source goes public once it has been tested on more projects.</p>
+    </div>
+  </section>
+
+  <section class="section" id="status" aria-labelledby="status-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">At a glance</p>
+        <h2 id="status-title">One screen for the whole fleet</h2>
+      </header>
+      <pre class="term" aria-label="Example output of flota status">$ flota status
+== shop  prefix SHOP  workdir ~/src/shop  mode bypassPermissions  max sections 4
+limit: OK 5h=12% (start&lt;60 pause&gt;=70)  7d=41% (start&lt;75 pause&gt;=80)
+KEY       SESSION        TMUX   STATE
+pm        SHOP-PM        alive  STATUS: IN PROGRESS: 3 orders out, nothing waiting on the owner
+merger    SHOP-Merger    alive  STATUS: IN PROGRESS Z-004: PR #31 rebased, CI running
+api       SHOP-Api       alive  STATUS: WAITING FOR review of PR #31
+web       SHOP-Web       alive  STATUS: IN PROGRESS Z-005: checkout form
+data      SHOP-Data      -      STATUS: IDLE
+guard     shop-guard     alive  12:04Z code=0 OK
+open orders: 3</pre>
+      <figure class="wd-figure">
+        {{diagram.flota.wide}}
+        {{diagram.flota.narrow}}
+        <figcaption class="small">Green: the sessions that do the work, each in its own tmux window. Orange: the two guards. Violet: the state files every session reads and writes. Dashed: files, not messages.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">How it works</p>
+        <h2 id="how-title">Small parts, state in files</h2>
+      </header>
+      <ul class="work-list">
+        <li><strong>Interactive start.</strong> <code>flota</code> opens a menu; <code>flota new</code> asks for the repository, the sections and their scope, the limits and the models, and writes the project.</li>
+        <li><strong>Roles, not chats.</strong> Every session gets its role (manager, section or the single merger) and its row of the routing table as part of its system prompt.</li>
+        <li><strong>Orders and reports.</strong> The manager sends numbered orders; sections answer with a report, decisions go to a log before they are acted on, and everything lives in files, so a restart loses nothing.</li>
+        <li><strong>One merger.</strong> Only one session merges, so pull requests land in order, rebased, with migrations numbered and CI green.</li>
+        <li><strong>Limits enforced in three steps.</strong> Below the start threshold nothing new starts; at the pause threshold the guard tells every session to commit and stop; at the hard one it closes the sections. It costs no tokens.</li>
+        <li><strong>A manager that cannot code.</strong> A tool hook refuses edits outside the fleet's own files, any shell that writes, and subagents; the reason goes back to the model with “give it to a section”.</li>
+        <li><strong>Survives reboots.</strong> Sessions are resumed by their saved id, and <code>flota restore</code> brings back the registered fleet after the host restarts.</li>
+      </ul>
+      <p class="section__more"><a href="/#projects">Back to all projects</a></p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap site-footer__inner">
+    <p><a href="/">All projects</a> · <a href="https://github.com/HubertMJ">GitHub</a></p>
+    <p class="small">No cookies, no trackers, no third-party requests.</p>
+  </div>
+</footer>
+</body>
+</html>

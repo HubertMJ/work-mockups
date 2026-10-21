@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vLLM Deployment Manager · mock-up · Hubert Jabłoński</title>
+<meta name="description" content="A mock-up of a system I built and run: a control plane for several vLLM engines on one multi-GPU host, with memory admission from measured profiles, bookings and a gateway that hides cold starts. The real one isn't public; this copy is written for this site, on made-up data.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#06080b">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="icon" href="/work/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/work/assets/{{styles.css}}">
+<script src="/work/assets/{{theme.js}}"></script>
+<script type="module" src="/work/assets/{{vllm-demo.js}}"></script>
+</head>
+<body class="vd-page" data-banner="">
+<a class="skip-link" href="#main">Skip to the mock-up</a>
+
+<header class="vd-sitebar">
+  <a class="vd-sitebar__home" href="/" aria-label="Back to hubertjablon.ski"><span aria-hidden="true">←</span> hubertjablon<span class="vd-sitebar__dot">.</span>ski</a>
+  <p class="vd-sitebar__note">A mock-up of a system I built and run. The real one isn't public: this copy is written for this site, on made-up data.</p>
+  <button type="button" class="vd-sitebar__about" id="vd-about-open" aria-haspopup="dialog" aria-controls="vd-about">About</button>
+</header>
+
+<main id="main" tabindex="-1" class="vd-main">
+  <div id="vdemo" class="vdemo vdemo--full">
+    <noscript><p class="vd-noscript">This mock-up runs in the browser and needs JavaScript. "About" above describes the system it stands in for.</p></noscript>
+  </div>
+</main>
+
+<dialog class="vd-dialog vd-drawer" id="vd-about" aria-labelledby="vd-about-title">
+  <div class="vd-dialog__head">
+    <h2 class="vd-dialog__title" id="vd-about-title">About this mock-up</h2>
+    <button type="button" class="vd-icon-btn vd-dialog__x" id="vd-about-close" aria-label="Close">×</button>
+  </div>
+  <div class="vd-dialog__body vd-about">
+    <p>A system I built and run: it serves several large language models from one machine with four GPUs. The real one isn't public, so this page is a mock-up of it, written from scratch for this site. Everything here runs in your browser on made-up data, and none of it is the real code.</p>
+
+    <h3>What it does</h3>
+    <p>Each model runs as its own vLLM engine in a container, and clients see one OpenAI-compatible endpoint: they name a model in <code>model</code> and a stopped one starts on demand. An operator decides which card a model lives on, how long a context it serves and whether it may be stopped to make room. External jobs book a model for a time window and can count on the memory being there.</p>
+
+    <figure class="wd-figure">
+      {{diagram.vllm.narrow}}
+      <figcaption class="vd-faint">Blue: a request's path. Green: the manager. Orange: Docker. Violet: the planner.</figcaption>
+    </figure>
+
+    <h3>How it works</h3>
+    <ul>
+      <li><strong>Two small services.</strong> A manager drives the containers; a gateway is the only client of the engines.</li>
+      <li><strong>Ready from the log, not from probes.</strong> The manager follows an engine's log until it says it is up, and reads its measured memory from the same lines.</li>
+      <li><strong>Admission by measured budgets.</strong> Each card is a budget of memory floors against a 95% ceiling, one start at a time. Free memory is read only to refuse a start, never to admit one.</li>
+      <li><strong>Eviction that knows what it may stop.</strong> Only idle on-demand models go, least recently used first; pinned and booked ones never. A start that does not fit even then is refused before anything stops.</li>
+      <li><strong>A gateway that hides cold starts.</strong> It keeps the client's stream alive with comment keepalives while the model loads, then passes the engine's answer through untouched.</li>
+      <li><strong>One planner for every promise.</strong> Bookings, pins, edits and deletes go through the same interval check, and a refusal names the booking in the way.</li>
+    </ul>
+
+    <h3>What I like about it</h3>
+    <ul>
+      <li>Two starts can never both see free memory and both run out: admission trusts measured profiles, with an estimate only until the first measurement.</li>
+      <li>A booking admitted on an estimate turns unfulfillable as soon as a measurement disproves it, with the reason, instead of failing at its start time.</li>
+      <li>The client never notices a model being loaded, and the stream it gets is the engine's own.</li>
+    </ul>
+
+    <h3>What to try</h3>
+    <ul>
+      <li>Start <code>model-b</code>, then <code>model-a-moe</code> on the same card: the first is evicted to make room.</li>
+      <li>Start <code>qwen2.5-7b</code>: its card is full and nothing there may be stopped, so it is refused.</li>
+      <li>In the Playground, send a prompt to a stopped model and watch the cold start.</li>
+      <li>Pin <code>model-c</code>: a booking stands in the way.</li>
+    </ul>
+    <p class="vd-faint">The models are public ones or placeholders, the host and addresses are invented, and the answers are canned. "Reset demo" puts everything back.</p>
+  </div>
+  <div class="vd-dialog__actions">
+    <a class="vd-btn" href="/#projects">All projects</a>
+    <button type="button" class="vd-btn vd-btn--primary" id="vd-about-done">Close</button>
+  </div>
+</dialog>
+</body>
+</html>

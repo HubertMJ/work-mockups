@@ -42,11 +42,12 @@ test("every page loads its scripts, styles and fonts from /work/ only", async ({
   }
 });
 
-test("/work/ sends the visitor to the landing page's projects; /healthz answers; other paths are not this image's", async ({ request }) => {
-  for (const p of ["/work/", "/work"]) {
+test("/work/ sends the visitor to the landing page's projects, /work to /work/; /healthz answers; other paths are not this image's", async ({ request }) => {
+  for (const [p, code, to] of [["/work/", 302, "/#projects"], ["/work", 301, "/work/"]] as const) {
     const r = await request.get(p, { maxRedirects: 0 });
-    expect(r.status(), p).toBe(302);
-    expect(r.headers().location).toBe("/#projects");
+    expect(r.status(), p).toBe(code);
+    // A path, never a host or a port.
+    expect(r.headers().location, p).toBe(to);
   }
   expect(await (await request.get("/healthz")).text()).toBe("ok\n");
   for (const p of ["/cluster/", "/lab/", "/work/nothing/"]) expect((await request.get(p)).status(), p).toBe(404);

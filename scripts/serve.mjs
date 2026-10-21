@@ -1,6 +1,7 @@
 // Serves dist/ on http://127.0.0.1:4173 for local viewing and the e2e tests. Static files only; the
 // pages live at /work/vllm/, /work/bridge/ and /work/flota/. It answers like nginx.conf: /work/ itself
-// redirects to the landing page's projects (302 /#projects), /healthz says ok, and every other path
+// redirects to the landing page's projects (302 /#projects), the bare /work to /work/ (301), /healthz
+// says ok, and every other path
 // (the landing page, /cluster/, /lab/) belongs to other images on the same origin and is a 404 here.
 // Every response carries the headers in security-headers.conf, the CSP with Trusted Types included, so
 // the e2e tests run under the policy nginx serves.
@@ -38,9 +39,10 @@ createServer(async (req, res) => {
     res.end("ok\n");
     return;
   }
-  if (path === "/work" || path === "/work/") {
-    res.writeHead(302, { ...HEADERS, location: "/#projects", "content-type": "text/plain" });
-    res.end("see /#projects\n");
+  if (path === "/work/" || path === "/work") {
+    const [code, location] = path === "/work/" ? [302, "/#projects"] : [301, "/work/"];
+    res.writeHead(code, { ...HEADERS, location, "content-type": "text/plain" });
+    res.end(`see ${location}\n`);
     return;
   }
   if (path.endsWith("/")) path += "index.html";

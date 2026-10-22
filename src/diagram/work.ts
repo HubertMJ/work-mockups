@@ -41,6 +41,8 @@ export interface WLayout {
   boxes: Record<string, Box>;
   zones: { box: Box; title: string; sub: string }[];
   edges: WEdge[];
+  /** This drawing's own routes for its traffic, where it draws other links than the diagram's ROUTES. */
+  routes?: string[][];
 }
 
 export interface WDiagram {
@@ -266,42 +268,49 @@ function flotaWide(): WLayout {
 }
 
 function flotaNarrow(): WLayout {
-  const x = 150;
-  const w = 194;
+  // The sessions down a column, the hook beside the manager, the zone's title above the hook. Nothing
+  // crosses the title, so what comes from above meets the column right of it. Every other box is too
+  // wide to stand beside a session, so each gets a row of its own outside the zone, beside the link it
+  // makes: the owner and the guard above, the owner's line turning to the manager, the guard's straight
+  // down to it and, on its own down the right, into the sections; the state files below, beside the
+  // merger; main lower still, under the merger. No two lines cross or run side by side, and no two heads share a side.
+  const x = 136;
+  const w = 170;
   const B: Record<string, Box> = {
-    owner: bx(x, 8, w),
-    // Beside the manager with room for a whole arrow between them.
-    hook: bx(20, 136, 96),
-    pm: bx(x, 136, w),
-    // "by name" is two-way: the gap holds both heads and line between them.
-    sections: bx(x, 244, w),
-    merger: bx(x, 330, w),
-    main: bx(x, 430, w),
-    state: bx(x, 516, w),
-    guard: bx(x, 600, w),
+    owner: bx(12, 8, 140),
+    guard: bx(186, 8, 160),
+    hook: bx(20, 152, 89, 44),
+    pm: bx(x, 148, w),
+    sections: bx(x, 256, w),
+    merger: bx(x, 342, w),
+    state: bx(12, 430, 185),
+    main: bx(x, 516, w),
   };
-  const zone = bx(8, 96, 344, 300);
-  // The guard and the state files hang below on trunks up the left margin (the guard's outermost) and
-  // reach the sessions' own boxes: the guard the manager (under it, in the gap above the sections) and
-  // the sections (their left side, high), the state files the sections (their left side, low). No two
-  // lines cross. A stub's label sits on its shaft, 8 above the line.
-  const g = cy(B.guard);
-  const s = cy(B.state);
+  const right = 332;
+  const into = 212;
+  const turn = 88;
+  const leg = 100;
   return {
     view: "narrow",
     width: 360,
-    height: 664,
+    height: 576,
     boxes: B,
-    zones: [{ box: zone, title: "TMUX", sub: "a session per window" }],
+    zones: [{ box: bx(8, 104, 344, 306), title: "TMUX", sub: "a session per window" }],
+    routes: [
+      ["owner", "pm", "sections", "merger", "main"],
+      ["guard", "pm"],
+      ["guard", "sections"],
+      ["merger", "state"],
+    ],
     edges: [
-      down(B.owner, B.pm, "talks", undefined, { both: true, at: [cx(B.owner) + 8, 86] }),
-      down(B.pm, B.sections, "by name", undefined, { both: true }),
+      path([[cx(B.owner), B.owner.y + B.owner.h + GAP], [cx(B.owner), turn], [into, turn], [into, B.pm.y - GAP]], "talks", [(cx(B.owner) + into) / 2, turn - 8], "middle", { both: true }),
+      down(B.pm, B.sections, "by name", undefined, { both: true, at: [cx(B.pm) - 8, (B.pm.y + B.pm.h + B.sections.y) / 2 + 4], anchor: "end" }),
       down(B.sections, B.merger, "branch"),
-      down(B.merger, B.main, "merges", undefined, { at: [cx(B.merger) + 8, 416] }),
+      down(B.merger, B.main, "merges"),
       across(B.hook, B.pm, ""),
-      path([[x, g], [20, g], [20, 216], [x + 20, 216], [x + 20, B.pm.y + B.pm.h + GAP]], "PAUSE·HARD·OK", [(20 + x) / 2, g - 8], "middle"),
-      path([[x, g], [20, g], [20, B.sections.y + 14], [x - GAP, B.sections.y + 14]], "", [0, 0], "middle"),
-      path([[x - GAP, s], [44, s], [44, B.sections.y + 38], [x - GAP, B.sections.y + 38]], "read/write", [(44 + x - GAP - HEAD) / 2, s - 8], "middle", { dashed: true, both: true }),
+      down(B.guard, B.pm, "", 260),
+      path([[right, B.guard.y + B.guard.h], [right, cy(B.sections)], [x + w + GAP, cy(B.sections)]], "PAUSE·HARD·OK", [right - 8, (B.pm.y + B.pm.h + B.sections.y) / 2 + 4], "end"),
+      path([[leg, B.state.y - GAP], [leg, cy(B.merger)], [x - GAP, cy(B.merger)]], "read/write", [leg - 8, cy(B.merger) + 18], "end", { dashed: true, both: true }),
     ],
   };
 }
@@ -440,7 +449,7 @@ const prefix = (d: WDiagram, view: WLayout["view"]) => `wd-${d.id}-${view}`;
 /** The moving parts' markup: under the boxes (a dot sinks into a box and comes out the other side). */
 function trafficMarkup(d: WDiagram, lay: WLayout): string[] {
   const p = prefix(d, lay.view);
-  const { lanes: ls } = lanes(lay, ROUTES[d.id]);
+  const { lanes: ls } = lanes(lay, lay.routes ?? ROUTES[d.id]);
   const glows = ls.flatMap((l, i) => l.legs.map((g, k) => el("path", { class: "wd-glow", id: `${p}-glow-${i}-${k}`, d: pathD(g.pts) })));
   const halos = ls.flatMap((l, i) =>
     l.route.slice(1).map((id, k) => {
@@ -456,7 +465,7 @@ function trafficMarkup(d: WDiagram, lay: WLayout): string[] {
  * moment in the round. Percentages of one round, so every part of a drawing shares one clock. */
 function laneCss(d: WDiagram, lay: WLayout): string[] {
   const p = prefix(d, lay.view);
-  const { lanes: ls, period } = lanes(lay, ROUTES[d.id]);
+  const { lanes: ls, period } = lanes(lay, lay.routes ?? ROUTES[d.id]);
   const pct = (s: number) => `${Math.round(Math.min(100, Math.max(0, (s / period) * 100)) * 100) / 100}%`;
   const css: string[] = [];
   ls.forEach((l, i) => {

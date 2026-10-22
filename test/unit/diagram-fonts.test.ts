@@ -26,7 +26,7 @@ const fingerprint = (base: string, files: string[]) => {
 };
 /** Change a file in one repository, copy it to the others, and update these lines in each. */
 const PINNED_FONTS = "264215387685b5517e28399e9da53fc10c1623f62f3fcb20e51402bc56d1aa52";
-const PINNED_MEASURE = "bb038abe3377686b93fb53956b972e869ca8d9e18a5280370dc83990db0f672d";
+const PINNED_MEASURE = "afa64c5e07e919ebdfd78694240f4a60dbee395b21445655ce77a6fe87dbdd45";
 
 describe("the diagrams' fonts and their measure", () => {
   test("are the copies every repository carries", () => {

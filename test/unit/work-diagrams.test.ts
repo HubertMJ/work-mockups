@@ -67,7 +67,7 @@ describe("the drawings' traffic", () => {
   test("a dot starts in its first box, ends in its last, and its legs and boxes come in order", () => {
     for (const d of WORK_DIAGRAMS)
       for (const lay of d.layouts) {
-        const { lanes: ls, period } = lanes(lay, ROUTES[d.id]);
+        const { lanes: ls, period } = lanes(lay, lay.routes ?? ROUTES[d.id]);
         expect(period).toBeGreaterThan(0);
         let end = 0;
         for (const l of ls) {

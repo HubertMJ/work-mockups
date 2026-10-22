@@ -9,7 +9,9 @@
 // - an arrowhead has room: the straight run it ends shows 10 units of line behind the head, and a
 //   two-way line keeps 14 between its two heads; no two arrowheads touch;
 // - lines keep apart: no two cross, no two run side by side (parallel, closer than 16, for more than 40
-//   units), and no two arrowheads sit within 24 of each other on one side of a box.
+//   units), and no two arrowheads sit within 24 of each other on one side of a box. A fan is the
+//   exception: lines that leave one point (or reach one) may share a trunk, run on top of each other
+//   (0 apart, not near), and end in one arrowhead where they reach one tip from one direction.
 // A text's box is its em box (ascent to descent), so these are clearances of the ink and then some.
 
 import type { Page } from "@playwright/test";
@@ -44,14 +46,18 @@ export async function diagramProblems(page: Page): Promise<string[]> {
       // An arrowhead's area: 11 units back from the line's end, 5.5 either side of it.
       const heads: B[] = [];
       const tips: DOMPoint[] = [];
+      const ways: [number, number][] = [];
       for (const p of lines) {
         const len = p.getTotalLength();
         const head = (tip: number, back: number) => {
           const a = at(p, tip);
           const b = at(p, back);
-          tips.push(a);
           const n = Math.hypot(a.x - b.x, a.y - b.y) || 1;
           const [dx, dy] = [(a.x - b.x) / n, (a.y - b.y) / n];
+          // Lines of a fan meeting at one tip from one direction draw one arrowhead there.
+          if (tips.some((q, i) => Math.hypot(q.x - a.x, q.y - a.y) < 0.5 && Math.hypot(ways[i][0] - dx, ways[i][1] - dy) < 0.05)) return;
+          tips.push(a);
+          ways.push([dx, dy]);
           const pts = [[a.x, a.y], [a.x - dx * 11 + dy * 5.5, a.y - dy * 11 - dx * 5.5], [a.x - dx * 11 - dy * 5.5, a.y - dy * 11 + dx * 5.5]];
           const xs = pts.map((q) => q[0]);
           const ys = pts.map((q) => q[1]);
@@ -100,6 +106,7 @@ export async function diagramProblems(page: Page): Promise<string[]> {
       for (const [i, h] of heads.entries()) if (heads.slice(i + 1).some((o) => hit(h, o))) out.push(`${name}: two arrowheads touch at ${h.x.toFixed(0)},${h.y.toFixed(0)}`);
       // Each line as its straight runs (a corner ends one; a curve is many short ones), in the drawing's units.
       type P = { x: number; y: number };
+      const stops = lines.map((p) => [at(p, 0), at(p, p.getTotalLength())]);
       const runs = lines.map((p) => {
         const len = p.getTotalLength();
         const rs: [P, P][] = [];
@@ -117,8 +124,12 @@ export async function diagramProblems(page: Page): Promise<string[]> {
         return rs;
       });
       const xy = (q: P) => `${q.x.toFixed(0)},${q.y.toFixed(0)}`;
+      const meet = (a: P, b: P) => Math.hypot(a.x - b.x, a.y - b.y) < 1;
       for (const [i, ra] of runs.entries()) {
-        for (const rb of runs.slice(i + 1)) {
+        for (const [j, rb] of runs.entries()) {
+          if (j <= i) continue;
+          // Two lines of one fan: they leave one point or reach one.
+          const fan = meet(stops[i][0], stops[j][0]) || meet(stops[i][1], stops[j][1]);
           for (const [a0, a1] of ra) {
             for (const [b0, b1] of rb) {
               const [ax, ay, bx, by] = [a1.x - a0.x, a1.y - a0.y, b1.x - b0.x, b1.y - b0.y];
@@ -136,6 +147,8 @@ export async function diagramProblems(page: Page): Promise<string[]> {
               const gap = Math.abs((b0.x - a0.x) * ay - (b0.y - a0.y) * ax) / la;
               const [s0, s1] = [((b0.x - a0.x) * ax + (b0.y - a0.y) * ay) / la, ((b1.x - a0.x) * ax + (b1.y - a0.y) * ay) / la];
               const shared = Math.min(la, Math.max(s0, s1)) - Math.max(0, Math.min(s0, s1));
+              // A fan's trunk: its lines on top of each other, which is one line.
+              if (fan && gap < 0.5) continue;
               if (gap < 16 && shared > 40) out.push(`${name}: two lines run side by side, ${gap.toFixed(0)} apart for ${shared.toFixed(0)}, at ${xy(a0)} to ${xy(a1)} and ${xy(b0)} to ${xy(b1)}`);
             }
           }

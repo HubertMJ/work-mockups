@@ -52,6 +52,8 @@ export interface WDiagram {
 }
 
 const bx = (x: number, y: number, w: number, h = 52): Box => ({ x, y, w, h });
+/** An arrowhead's length: a label over a line is centred on the shaft before it, never over the head. */
+const HEAD = 11;
 const cx = (b: Box) => b.x + b.w / 2;
 const cy = (b: Box) => b.y + b.h / 2;
 
@@ -73,16 +75,21 @@ function across(a: Box, b: Box, label: string, y = cy(a), o: Opt = {}): WEdge {
   const rightward = b.x > a.x;
   const x0 = (rightward ? a.x + a.w : a.x) + (o.both ? (rightward ? GAP : -GAP) : 0);
   const x1 = rightward ? b.x - GAP : b.x + b.w + GAP;
-  return { pts: [[x0, y], [x1, y]], label, at: o.at ?? [(x0 + x1) / 2, y - 8], anchor: o.anchor ?? "middle", dashed: o.dashed, both: o.both };
+  // Centred on the shaft: clear of the head at the far end, and of the near one too on a two-way edge.
+  const dir = rightward ? 1 : -1;
+  const s0 = x0 + (o.both ? dir * HEAD : 0);
+  const s1 = x1 - dir * HEAD;
+  return { pts: [[x0, y], [x1, y]], label, at: o.at ?? [(s0 + s1) / 2, y - 8], anchor: o.anchor ?? "middle", dashed: o.dashed, both: o.both };
 }
 const path = (pts: Pt[], label: string, at: Pt, anchor: WEdge["anchor"], o: Opt = {}): WEdge => ({ pts, label, at, anchor, dashed: o.dashed, both: o.both });
 
 // ---------- the vLLM deployment manager (in the mock-up's About drawer: the narrow drawing only) ----------
 
 function vllmNarrow(): WLayout {
-  const L = 20;
+  // The columns sit left enough for the planner's trunk to leave room for a whole arrow back into it.
+  const L = 16;
   const R = 232;
-  const w = 160;
+  const w = 150;
   const B: Record<string, Box> = {
     clients: bx(L, 40, w), ui: bx(R, 40, w),
     gateway: bx(L, 176, w), manager: bx(R, 176, w),
@@ -100,7 +107,7 @@ function vllmNarrow(): WLayout {
       { box: bx(8, 136, 406, 336), title: "GPU-HOST-1", sub: "" },
     ],
     edges: [
-      down(B.clients, B.gateway, "/v1/*", 140, { at: [148, 126] }),
+      down(B.clients, B.gateway, "/v1/*", 132, { at: [140, 126] }),
       down(B.ui, B.manager, "actions", undefined, { at: [cx(B.ui) + 8, 126] }),
       across(B.gateway, B.manager, "ensure"),
       down(B.gateway, B.engines, "stream"),
@@ -169,8 +176,8 @@ function bridgeWide(): WLayout {
 }
 
 function bridgeNarrow(): WLayout {
-  const x = 120;
-  const w = 220;
+  const x = 140;
+  const w = 200;
   const h = 48;
   const main = ["mention", "webhook", "who", "mode", "queue", "run", "passes", "pr"];
   const B: Record<string, Box> = {};
@@ -181,7 +188,8 @@ function bridgeNarrow(): WLayout {
   const labels = ["event", "verified", "allowed", "job", "worker", "diff", "reply"];
   const flow = labels.map((l, i) => down(B[main[i]], B[main[i + 1]], l));
   // The side boxes hang off the queue and the run on trunks down the left, outermost for the lowest.
-  const stub = (trunk: number, y: number) => [(trunk + x - GAP) / 2, y - 6] as Pt;
+  // A stub's label: centred on its shaft (the trunk to the arrowhead), 8 above the line.
+  const stub = (trunk: number, y: number) => [(trunk + x - GAP - HEAD) / 2, y - 8] as Pt;
   return {
     view: "narrow",
     width: 360,
@@ -229,9 +237,10 @@ function flotaWide(): WLayout {
     owner: bx(20, 140, 180),
     hook: bx(272, 50, 180, 44),
     pm: bx(272, 140, 180),
-    sections: bx(510, 140, 180),
-    merger: bx(750, 140, 170),
-    main: bx(1000, 140, 160),
+    // Gaps sized for their labels on the shaft: "by name" between two arrowheads needs the widest.
+    sections: bx(532, 140, 180),
+    merger: bx(772, 140, 168),
+    main: bx(1020, 140, 150),
     guard: bx(300, 290, 250),
     state: bx(610, 290, 280),
   };
@@ -240,7 +249,7 @@ function flotaWide(): WLayout {
     width: 1180,
     height: 400,
     boxes: B,
-    zones: [{ box: bx(250, 20, 686, 188), title: "TMUX", sub: "a session per window, addressed by name" }],
+    zones: [{ box: bx(250, 20, 700, 188), title: "TMUX", sub: "a session per window, addressed by name" }],
     edges: [
       across(B.owner, B.pm, "talks", undefined, { both: true }),
       across(B.pm, B.sections, "by name", undefined, { both: true }),
@@ -257,34 +266,42 @@ function flotaWide(): WLayout {
 }
 
 function flotaNarrow(): WLayout {
-  const x = 120;
-  const w = 220;
+  const x = 150;
+  const w = 194;
   const B: Record<string, Box> = {
     owner: bx(x, 8, w),
-    hook: bx(12, 136, 98),
+    // Beside the manager with room for a whole arrow between them.
+    hook: bx(20, 136, 96),
     pm: bx(x, 136, w),
-    sections: bx(x, 222, w),
-    merger: bx(x, 308, w),
-    main: bx(x, 412, w),
-    state: bx(x, 500, w),
-    guard: bx(x, 584, w),
+    // "by name" is two-way: the gap holds both heads and line between them.
+    sections: bx(x, 244, w),
+    merger: bx(x, 330, w),
+    main: bx(x, 430, w),
+    state: bx(x, 516, w),
+    guard: bx(x, 600, w),
   };
-  const zone = bx(8, 96, 344, 280);
-  const zoneBottom = zone.y + zone.h + GAP;
+  const zone = bx(8, 96, 344, 300);
+  // The guard and the state files hang below on trunks up the left margin (the guard's outermost) and
+  // reach the sessions' own boxes: the guard the manager (under it, in the gap above the sections) and
+  // the sections (their left side, high), the state files the sections (their left side, low). No two
+  // lines cross. A stub's label sits on its shaft, 8 above the line.
+  const g = cy(B.guard);
+  const s = cy(B.state);
   return {
     view: "narrow",
     width: 360,
-    height: 652,
+    height: 664,
     boxes: B,
     zones: [{ box: zone, title: "TMUX", sub: "a session per window" }],
     edges: [
       down(B.owner, B.pm, "talks", undefined, { both: true, at: [cx(B.owner) + 8, 86] }),
       down(B.pm, B.sections, "by name", undefined, { both: true }),
       down(B.sections, B.merger, "branch"),
-      down(B.merger, B.main, "merges", undefined, { at: [cx(B.merger) + 8, 396] }),
+      down(B.merger, B.main, "merges", undefined, { at: [cx(B.merger) + 8, 416] }),
       across(B.hook, B.pm, ""),
-      path([[x, cy(B.state)], [44, cy(B.state)], [44, zoneBottom]], "read/write", [(44 + x) / 2, cy(B.state) - 6], "middle", { dashed: true, both: true }),
-      path([[x, cy(B.guard)], [20, cy(B.guard)], [20, zoneBottom]], "PAUSE·HARD·OK", [(20 + x) / 2 + 2, cy(B.guard) - 6], "middle"),
+      path([[x, g], [20, g], [20, 216], [x + 20, 216], [x + 20, B.pm.y + B.pm.h + GAP]], "PAUSE·HARD·OK", [(20 + x) / 2, g - 8], "middle"),
+      path([[x, g], [20, g], [20, B.sections.y + 14], [x - GAP, B.sections.y + 14]], "", [0, 0], "middle"),
+      path([[x - GAP, s], [44, s], [44, B.sections.y + 38], [x - GAP, B.sections.y + 38]], "read/write", [(44 + x - GAP - HEAD) / 2, s - 8], "middle", { dashed: true, both: true }),
     ],
   };
 }
@@ -300,7 +317,7 @@ const FLOTA: WDiagram = {
   nodes: [
     { id: "owner", label: "Owner", sub: "you, in one window", role: "path", tip: "You talk to the project manager only; it tells you what the fleet did." },
     { id: "hook", label: "PM hook", sub: "no edits", role: "project", tip: "A tool hook on the manager refuses edits and writes, and says: give it to a section." },
-    { id: "pm", label: "Project manager", sub: "plans, hands out work", role: "site", tip: "The manager session splits the work and sends it to sections by name; it cannot do the work itself." },
+    { id: "pm", label: "Project manager", sub: "plans, hands out work", role: "site", tip: "Splits the work and sends it to sections by name; it cannot do the work itself." },
     { id: "sections", label: "Sections", sub: "own tmux session each", role: "site", tip: "Each section is a session in its own window with its own scope, reporting back when done." },
     { id: "merger", label: "Merger", sub: "the only one to merge", role: "site", tip: "One session merges, so branches land on main one at a time and in order." },
     { id: "main", label: "main", sub: "the project's branch", role: "path", tip: "Where the fleet's work ends up." },

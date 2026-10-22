@@ -18,6 +18,8 @@
 @import "./ascii/ascii.css";
 /* The diagrams' node panel (src/node-panel): a box's details under the drawing, in the normal look. */
 @import "./node-panel/node-panel.css";
+/* The diagrams' own fonts (src/diagram-fonts): every device draws the words the tests measured. */
+@import "./diagram-fonts/diagram-fonts.css";
 /* /work/vllm/: the full-page mock-up, scoped under .vd-page and .vdemo. */
 @import "./vllm/demo/demo.css";
 
@@ -1138,7 +1140,7 @@ html[data-folded~="projects"] #projects
 }
 
 .em-zone-title {
-  font: 600 11px var(--font-mono);
+  font: 600 11px var(--diagram-mono);
   letter-spacing: 0.1em;
   fill: var(--text-muted);
 }
@@ -1175,13 +1177,13 @@ html[data-folded~="projects"] #projects
 }
 
 .em-label {
-  font: 650 14px var(--font-sans);
+  font: 650 14px var(--diagram-sans);
   fill: var(--text);
   text-anchor: middle;
 }
 
 .em-sub {
-  font: 400 10.5px var(--font-mono);
+  font: 400 10.5px var(--diagram-mono);
   fill: var(--text-muted);
   text-anchor: middle;
 }
@@ -1197,7 +1199,12 @@ html[data-folded~="projects"] #projects
 }
 
 .em-edge-label {
-  font: 500 10.5px var(--font-mono);
+  font: 500 10.5px var(--diagram-mono);
+  /* A halo in the page's colour: a line passing under a label never makes it unreadable. */
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
   fill: var(--text-muted);
 }
 

@@ -26,6 +26,8 @@
 }
 /* The About drawer's drawing uses the site's diagram classes: their tokens, dark here in both themes. */
 .vd-page {
+  /* The edge labels' halo takes the page's ground: the drawer's, dark in both themes. */
+  --bg: #0a0e13;
   --surface: #13161c;
   --border: #272c36;
   --text: #ebe9e4;

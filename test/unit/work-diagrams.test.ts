@@ -5,11 +5,14 @@ import { lanes, ROUTES, trafficCss, WORK_DIAGRAMS, workSvgs } from "../../src/di
 // The measured rules (words inside boxes, lines clear of boxes and labels) are in test/e2e/work-diagrams.spec.ts.
 
 describe.each(WORK_DIAGRAMS.map((d) => [d.id, d] as const))("the %s drawing", (_, d) => {
-  test("every node has a box in every layout, inside the drawing, and a sentence for its popup", () => {
+  test("every node has a box in every layout that does not fold it, inside the drawing, and a sentence for its popup", () => {
+    for (const n of d.nodes) expect(d.layouts.some((l) => l.boxes[n.id]), n.id).toBe(true);
     for (const n of d.nodes) expect(n.tip.length, n.id).toBeGreaterThan(20);
     expect(new Set(d.nodes.map((n) => n.id)).size).toBe(d.nodes.length);
     for (const l of d.layouts) {
-      expect(Object.keys(l.boxes).sort()).toEqual(d.nodes.map((n) => n.id).sort());
+      // A drawing may fold some parts into one box (fleet beta on a phone); each node is drawn somewhere.
+      for (const id of l.folded ?? []) expect(d.nodes.map((n) => n.id), `${l.view} folds ${id}`).toContain(id);
+      expect(Object.keys(l.boxes).sort()).toEqual(d.nodes.map((n) => n.id).filter((id) => !l.folded?.includes(id)).sort());
       for (const [id, b] of Object.entries(l.boxes)) expect(b.x >= 0 && b.y >= 0 && b.x + b.w <= l.width && b.y + b.h <= l.height, `${l.view} ${id}`).toBe(true);
     }
   });
@@ -34,7 +37,7 @@ describe.each(WORK_DIAGRAMS.map((d) => [d.id, d] as const))("the %s drawing", (_
 test("the markup: nodes are g[data-node] with a rect and a tip, edges are M/L paths, and no style attributes", () => {
   const all = workSvgs();
   const svgs = Object.fromEntries(Object.entries(all).filter(([k]) => !k.endsWith(".panel")));
-  expect(Object.keys(svgs).sort()).toEqual(["diagram.bridge.narrow", "diagram.bridge.wide", "diagram.flota.narrow", "diagram.flota.wide", "diagram.vllm.narrow"]);
+  expect(Object.keys(svgs).sort()).toEqual(["diagram.bridge.narrow", "diagram.bridge.wide", "diagram.fleets.narrow", "diagram.fleets.wide", "diagram.flota.narrow", "diagram.flota.wide", "diagram.vllm.narrow"]);
   // Under each drawing, the node panel: an entry for every box, with what its ASCII popup says.
   for (const d of WORK_DIAGRAMS) {
     const doc = new DOMParser().parseFromString(all[`diagram.${d.id}.panel`], "text/html");
@@ -84,6 +87,24 @@ describe("the drawings' traffic", () => {
         }
         expect(end).toBeLessThanOrEqual(period);
       }
+  });
+
+  test("a dot between two legs on one side of a box (the spool's, on the wide drawing) dips to its centre, out of sight", () => {
+    const d = WORK_DIAGRAMS.find((x) => x.id === "fleets")!;
+    for (const lay of d.layouts) {
+      const spool = lay.boxes.spool;
+      const centre = [spool.x + spool.w / 2, spool.y + spool.h / 2];
+      const l = lanes(lay, ROUTES.fleets).lanes[0];
+      expect(l.route, lay.view).toEqual(["alpha", "spool", "betaCourier", "beta"]);
+      if (lay.view === "wide") expect(l.path).toContainEqual(centre);
+      // Every step of the dot's path off the drawn legs runs inside a box.
+      const inside = (x: number, y: number) => Object.values(lay.boxes).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
+      for (let i = 1; i < l.path.length; i++) {
+        const [a, b] = [l.path[i - 1], l.path[i]];
+        const onLeg = l.legs.some((g) => g.pts.some((p, k) => k > 0 && p[0] === b[0] && p[1] === b[1] && g.pts[k - 1][0] === a[0] && g.pts[k - 1][1] === a[1]));
+        if (!onLeg) expect(inside((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), `${lay.view} ${a} to ${b}`).toBe(true);
+      }
+    }
   });
 
   test("every moving part has its rule, and none of it is a node or an edge (ASCII mode reads those)", () => {

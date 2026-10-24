@@ -26,6 +26,16 @@ test("each page loads, says what it is, fits the screen and carries no screensho
   }
 });
 
+// Flota's page also covers many fleets: the managers' channel and MultiAsk, in words and in a second drawing.
+test("the Flota page describes the channel between fleets and MultiAsk", async ({ page }) => {
+  await page.goto("/work/flota/");
+  const fleets = page.locator("#fleets");
+  await expect(fleets.getByRole("heading", { level: 2 })).toHaveText("Managers that talk, one place for questions");
+  await expect(fleets.locator("pre.term")).toContainText("flota channel receive");
+  await expect(fleets.locator('svg.wd-map[data-diagram="fleets"]')).toHaveCount(2);
+  for (const words of ["Managers talk across fleets.", "A courier that never types the message.", "MultiAsk."]) await expect(page.locator("#how .work-list")).toContainText(words);
+});
+
 // The Gateway sends /work/ to this image and everything else elsewhere: a page that loaded anything
 // outside /work/ would get another service's answer.
 test("every page loads its scripts, styles and fonts from /work/ only", async ({ page }) => {

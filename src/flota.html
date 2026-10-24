@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flota · Hubert Jabłoński</title>
-<meta name="description" content="A fleet of AI coding sessions for one project: a manager that delegates, sections in their own terminals, and a usage-limit guard.">
+<meta name="description" content="A fleet of AI coding sessions for one project: a manager that delegates, sections in their own terminals, a usage-limit guard, and managers of many fleets that talk to each other.">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
@@ -42,8 +42,8 @@
     <div class="wrap">
       <p class="eyebrow">Tool</p>
       <h1 id="page-title">Flota: a fleet of AI coding sessions for one project</h1>
-      <p class="hero__lead">A project manager session hands out work; section sessions do it, each in its own terminal, addressed by name. A guard with no model watches the account's usage limits, and the manager is technically unable to do the work itself.</p>
-      <p class="work-note">Built and used on a real project, then rewritten from scratch as a general tool. The source goes public once it has been tested on more projects.</p>
+      <p class="hero__lead">A project manager session hands out work; section sessions do it, each in its own terminal, addressed by name. A guard with no model watches the account's usage limits, and the manager is technically unable to do the work itself. Managers of different fleets, even under different Linux users, write to each other, and one supervisor session gathers every fleet's questions for the owner.</p>
+      <p class="work-note">Built and used on a real project, then rewritten from scratch as a general tool. The source goes public once it has been tested on more projects; until then this page describes it, with made-up fleets.</p>
     </div>
   </section>
 
@@ -73,6 +73,33 @@ open orders: 3</pre>
     </div>
   </section>
 
+  <section class="section" id="fleets" aria-labelledby="fleets-title">
+    <div class="wrap">
+      <header class="section__head">
+        <p class="eyebrow">Across fleets</p>
+        <h2 id="fleets-title">Managers that talk, one place for questions</h2>
+      </header>
+      <pre class="term" aria-label="Example of the channel between two fleets' managers">$ flota channel who
+ADDRESS    USER   TMUX       FLEET
+ALPHA-PM   alpha  alpha-pm   shop: web and api
+BETA-PM    beta   beta-pm    data: imports and reports
+MultiAsk   owner  multiask   questions for the owner
+
+# typed into BETA-PM's window by its courier, once the prompt is empty
+CHANNEL: ALPHA-PM (shop: web and api, Linux user alpha) wants to reach you, unread: 1. Read: flota channel receive
+
+$ flota channel receive
+=== from ALPHA-PM (shop: web and api, Linux user alpha) | sender verified | 14:15
+│ CAN TAKE: 2 queued orders until Friday, api and web sections free.</pre>
+      <figure class="wd-figure">
+        {{diagram.fleets.wide}}
+        {{diagram.fleets.narrow}}
+        {{diagram.fleets.panel}}
+        <figcaption class="small">Each fleet is the drawing above, in small; on a phone fleet beta is folded into one box. Only the managers and MultiAsk reach the spool: sections never do. Green: sessions, each in its own tmux window. Orange: what runs no model, the hook, the limit guard and the couriers. Violet: plain files, each fleet's state and the shared spool. Blue: you and main. Dashed: files, not messages.</figcaption>
+      </figure>
+    </div>
+  </section>
+
   <section class="section" id="how" aria-labelledby="how-title">
     <div class="wrap">
       <header class="section__head">
@@ -86,6 +113,9 @@ open orders: 3</pre>
         <li><strong>One merger.</strong> Only one session merges, so pull requests land in order, rebased, with migrations numbered and CI green.</li>
         <li><strong>Limits enforced in three steps.</strong> Below the start threshold nothing new starts; at the pause threshold the guard tells every session to commit and stop; at the hard one it closes the sections. It costs no tokens.</li>
         <li><strong>A manager that cannot code.</strong> A tool hook refuses edits outside the fleet's own files, any shell that writes, and subagents; the reason goes back to the model with “give it to a section”.</li>
+        <li><strong>Managers talk across fleets.</strong> <code>flota channel send</code> drops a message in the other manager's mailbox in a spool on the host, and a registry says who is who. Only the sender's Linux user can write to its slot in a mailbox, so no fleet can pose as another; sections never use the channel.</li>
+        <li><strong>A courier that never types the message.</strong> Each fleet runs a courier with no model. When mail comes in and the manager sits idle (no dialog open, the owner not typing), it types one line into the manager's window: who wants to reach it. The manager reads the message itself with <code>flota channel receive</code>, as data, not as an order.</li>
+        <li><strong>MultiAsk.</strong> One supervisor session where the managers of all fleets put their questions to the owner, so many fleets running at once are watched from one window. A fleet's owner turns it on for that fleet; the answer goes back over the channel, and the manager takes it as the owner's only when it really comes from MultiAsk.</li>
         <li><strong>Survives reboots.</strong> Sessions are resumed by their saved id, and <code>flota restore</code> brings back the registered fleet after the host restarts.</li>
       </ul>
       <p class="section__more"><a href="/#projects">Back to all projects</a></p>

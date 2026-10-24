@@ -11,6 +11,8 @@ const PAGES: { path: string; id: string; open?: boolean; first: string; tip: str
   { path: "/work/vllm/", id: "vllm", open: true, first: "Gateway", tip: "Routes by the model's alias" },
   { path: "/work/bridge/", id: "bridge", first: "Webhook", tip: "Only signed deliveries count" },
   { path: "/work/flota/", id: "flota", first: "Merger", tip: "One session merges" },
+  // The same page's second drawing: many fleets' managers on the channel, and MultiAsk.
+  { path: "/work/flota/", id: "fleets", first: "MultiAsk", tip: "One session where every fleet's" },
 ];
 
 const openAbout = async (page: Page) => {
@@ -101,7 +103,7 @@ for (const p of PAGES) {
     await page.goto(`${p.path}?ascii=1`);
     await expect(page.locator("html")).toHaveClass(/ascii/);
     if (p.open) await openAbout(page);
-    const dg = page.locator("pre.ascii-dg:not([hidden])");
+    const dg = page.locator(`svg.wd-map[data-diagram="${p.id}"] + pre.ascii-dg:not([hidden])`);
     await expect(dg).toHaveCount(1);
     await expect(dg).toContainText(p.first);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -227,12 +229,13 @@ for (const p of PAGES) {
 test("the node panel shows at once with reduced motion, and is not there in ASCII mode", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/work/flota/");
-  await page.locator('svg.wd-map:visible [data-node="merger"]').evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
-  await expect(page.locator(".np-panel")).toHaveAttribute("data-open", "true");
-  expect(await page.locator(".np-panel").evaluate((p) => getComputedStyle(p).transitionDuration.split(",").every((d) => parseFloat(d) === 0))).toBe(true);
+  const fig = page.locator('figure:has(svg.wd-map[data-diagram="flota"])');
+  await fig.locator('svg.wd-map:visible [data-node="merger"]').evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
+  await expect(fig.locator(".np-panel")).toHaveAttribute("data-open", "true");
+  expect(await fig.locator(".np-panel").evaluate((p) => getComputedStyle(p).transitionDuration.split(",").every((d) => parseFloat(d) === 0))).toBe(true);
   await page.goto("/work/flota/?ascii=1");
   await expect(page.locator("html")).toHaveClass(/ascii/);
-  expect(await page.locator(".np-slot").evaluate((s) => getComputedStyle(s).display)).toBe("none");
+  expect(await page.locator(".np-slot").evaluateAll((ss) => ss.map((s) => getComputedStyle(s).display))).toEqual(["none", "none"]);
 });
 
 // Every drawing set in the fonts it ships, measured at phone and desktop widths: the words in their

@@ -46,7 +46,7 @@ export interface WLayout {
 }
 
 export interface WDiagram {
-  id: "vllm" | "bridge" | "flota";
+  id: "vllm" | "bridge" | "flota" | "fleets";
   title: string;
   desc: string;
   nodes: WNode[];
@@ -315,6 +315,102 @@ function flotaNarrow(): WLayout {
   };
 }
 
+// ---------- many fleets: the channel between managers, and MultiAsk ----------
+
+// Each participant (a fleet's manager, or MultiAsk) the same way: its session, and under it, offset to
+// one side, its courier. The session's own line to the spool runs down past the courier on the other
+// side; the courier's two lines share one x, from the spool up into the courier and on into the session.
+type Column = { pm: Box; courier: Box; line: number; ping: number };
+function column(z: number, top: number, pmW: number, courier: Box["x"], courierW: number, gap: number, line: number, ping?: number): Column {
+  const pm = bx(z + 8, top, pmW);
+  const c = bx(z + courier, top + 52 + gap, courierW);
+  return { pm, courier: c, line: z + line, ping: ping === undefined ? cx(c) : z + ping };
+}
+
+function fleetsWide(): WLayout {
+  const zs = [20, 340, 660];
+  const [a, b, m] = zs.map((z) => column(z + 8, 56, 210, 126, 150, 44, 52, 180));
+  const spool = bx(40, 290, 880);
+  const B: Record<string, Box> = {
+    alpha: a.pm, alphaCourier: a.courier, beta: b.pm, betaCourier: b.courier, multiask: m.pm, askCourier: m.courier,
+    spool, owner: bx(1016, 56, 144),
+  };
+  const wire = (c: Column): WEdge[] => [
+    down(c.pm, spool, "send · receive", c.line, { dashed: true, both: true, at: [c.line + 8, 262] }),
+    up(c.courier, c.pm, "notice", c.ping),
+    up(spool, c.courier, "new mail", cx(c.courier), { dashed: true, at: [cx(c.courier) + 8, 262] }),
+  ];
+  return {
+    view: "wide",
+    width: 1180,
+    height: 362,
+    boxes: B,
+    zones: [
+      { box: bx(zs[0], 20, 300, 200), title: "FLEET ALPHA", sub: "Linux user alpha" },
+      { box: bx(zs[1], 20, 300, 200), title: "FLEET BETA", sub: "Linux user beta" },
+      { box: bx(zs[2], 20, 300, 200), title: "SUPERVISOR", sub: "the owner's user" },
+    ],
+    edges: [...wire(a), ...wire(b), ...wire(m), across(m.pm, B.owner, "asks · answers", undefined, { both: true })],
+  };
+}
+
+function fleetsNarrow(): WLayout {
+  // The two fleets side by side over the spool, MultiAsk under it the other way up (its courier first),
+  // and the owner under MultiAsk. Only the fleets get a zone: a zone's title would sit on MultiAsk's lines.
+  const [a, b] = [6, 184].map((z) => column(z, 40, 154, 40, 122, 44, 24));
+  const spool = bx(6, 248, 348);
+  const askCourier = bx(131, 344, 142);
+  const multiask = bx(99, 440, 174);
+  const owner = bx(99, 540, 174);
+  const B: Record<string, Box> = { alpha: a.pm, alphaCourier: a.courier, beta: b.pm, betaCourier: b.courier, spool, askCourier, multiask, owner };
+  const wire = (c: Column): WEdge[] => [
+    down(c.pm, spool, "", c.line, { dashed: true, both: true }),
+    up(c.courier, c.pm, "notice", c.ping),
+    up(spool, c.courier, "new mail", c.ping, { dashed: true }),
+  ];
+  const line = 115;
+  return {
+    view: "narrow",
+    width: 360,
+    height: 604,
+    boxes: B,
+    zones: [
+      { box: bx(6, 8, 170, 192), title: "FLEET ALPHA", sub: "" },
+      { box: bx(184, 8, 170, 192), title: "FLEET BETA", sub: "" },
+    ],
+    edges: [
+      ...wire(a),
+      ...wire(b),
+      up(multiask, spool, "send · receive", line, { dashed: true, both: true, at: [line - 8, 326], anchor: "end" }),
+      down(spool, askCourier, "new mail", cx(askCourier), { dashed: true }),
+      down(askCourier, multiask, "notice"),
+      down(multiask, owner, "asks · answers", 180, { both: true }),
+    ],
+  };
+}
+
+const FLEETS: WDiagram = {
+  id: "fleets",
+  title: "Many fleets, one owner",
+  desc:
+    "Each fleet's manager may run as another Linux user, so the managers talk through a shared spool: a mailbox per manager " +
+    "and a registry of who is who. A manager sends with flota channel send; the receiving fleet's courier, which runs no " +
+    "model, sees the new mail and, only while its manager is idle, types a one-line notice into the manager's window; the " +
+    "manager then reads the message itself. MultiAsk is one more participant with its own courier: every fleet's questions " +
+    "to the owner land there, the owner answers in one place, and each answer goes back over the channel to the manager that asked.",
+  nodes: [
+    { id: "alpha", label: "PM alpha", sub: "manages fleet alpha", role: "site", tip: "Fleet alpha's manager: it plans and hands out work at home, and reaches other fleets only through the channel." },
+    { id: "alphaCourier", label: "Courier", sub: "alpha · no model", role: "project", tip: "Checks alpha's mailbox every 30 seconds and, when the manager sits idle, types who wants to reach it, never the message." },
+    { id: "beta", label: "PM beta", sub: "manages fleet beta", role: "site", tip: "Runs as another Linux user and cannot see alpha's sessions at all: the spool is the one place they meet." },
+    { id: "betaCourier", label: "Courier", sub: "beta · no model", role: "project", tip: "Waits while a dialog is open or the owner is typing, and tries again on its next round; it costs no tokens." },
+    { id: "spool", label: "Channel spool", sub: "a mailbox per PM · who is who", role: "lab", tip: "A shared directory: a mailbox per manager, a slot in it only the sender's account can write to, and a registry of who is who." },
+    { id: "askCourier", label: "Courier", sub: "MultiAsk · no model", role: "project", tip: "MultiAsk is one more participant, with a courier of its own that tells it a question has come in." },
+    { id: "multiask", label: "MultiAsk", sub: "every PM's questions", role: "site", tip: "One session where every fleet's questions to the owner land; it asks them in one place and sends each answer back." },
+    { id: "owner", label: "Owner", sub: "you, in one window", role: "path", tip: "You answer every fleet's questions from one window, and each answer goes back to the manager that asked." },
+  ],
+  layouts: [fleetsWide(), fleetsNarrow()],
+};
+
 const FLOTA: WDiagram = {
   id: "flota",
   title: "How a fleet is wired",
@@ -336,7 +432,7 @@ const FLOTA: WDiagram = {
   layouts: [flotaWide(), flotaNarrow()],
 };
 
-export const WORK_DIAGRAMS: WDiagram[] = [VLLM, BRIDGE, FLOTA];
+export const WORK_DIAGRAMS: WDiagram[] = [VLLM, BRIDGE, FLOTA, FLEETS];
 
 // ---------- markup ----------
 
@@ -372,6 +468,12 @@ export const ROUTES: Record<WDiagram["id"], string[][]> = {
     ["guard", "pm"],
     ["guard", "sections"],
     ["sections", "state"],
+  ],
+  // A message from alpha to beta; beta's question to the owner through MultiAsk; the answer back.
+  fleets: [
+    ["alpha", "spool", "betaCourier", "beta"],
+    ["beta", "spool", "askCourier", "multiask", "owner"],
+    ["owner", "multiask", "spool", "betaCourier", "beta"],
   ],
 };
 /** Units a dot covers per second, the shortest run and the rest before the next route starts. */
@@ -421,7 +523,14 @@ export function lanes(lay: WLayout, routes: string[][]): { lanes: Lane[]; period
     if (legs.length !== route.length - 1) continue;
     const box = (id: string) => lay.boxes[id];
     const centre = (id: string): Pt => [box(id).x + box(id).w / 2, box(id).y + box(id).h / 2];
-    const path: Pt[] = [centre(route[0]), ...legs.flatMap((l) => l.pts), centre(route[route.length - 1])];
+    // Through the box between two legs, hidden under it. Where both legs meet one side of the box (the
+    // spool's top), the straight way would run along its edge in sight, so the dot dips to the centre.
+    const via = (id: string, p: Pt, q: Pt): Pt[] => {
+      const b = box(id);
+      const [mx, my] = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      return mx > b.x && mx < b.x + b.w && my > b.y && my < b.y + b.h ? [] : [centre(id)];
+    };
+    const path: Pt[] = [centre(route[0]), ...legs.flatMap((l, i) => (legs[i + 1] ? [...l.pts, ...via(route[i + 1], l.pts[l.pts.length - 1], legs[i + 1].pts[0])] : l.pts)), centre(route[route.length - 1])];
     const total = length(path);
     const spans: [number, number][] = [];
     const reach: number[] = [0];
@@ -431,8 +540,10 @@ export function lanes(lay: WLayout, routes: string[][]): { lanes: Lane[]; period
       spans.push([at / total, (at + len) / total]);
       at += len;
       const next = legs[i + 1];
-      // Through the box between two legs (hidden under it): its centre is half way.
-      const through = next ? dist(l.pts[l.pts.length - 1], next.pts[0]) : dist(l.pts[l.pts.length - 1], path[path.length - 1]);
+      const end = l.pts[l.pts.length - 1];
+      const hop = next ? [end, ...via(route[i + 1], end, next.pts[0]), next.pts[0]] : [end, path[path.length - 1]];
+      // Its centre is half way through.
+      const through = length(hop);
       reach.push((at + through / 2) / total);
       at += through;
     });

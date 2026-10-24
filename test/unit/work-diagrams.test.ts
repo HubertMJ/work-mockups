@@ -34,7 +34,7 @@ describe.each(WORK_DIAGRAMS.map((d) => [d.id, d] as const))("the %s drawing", (_
 test("the markup: nodes are g[data-node] with a rect and a tip, edges are M/L paths, and no style attributes", () => {
   const all = workSvgs();
   const svgs = Object.fromEntries(Object.entries(all).filter(([k]) => !k.endsWith(".panel")));
-  expect(Object.keys(svgs).sort()).toEqual(["diagram.bridge.narrow", "diagram.bridge.wide", "diagram.flota.narrow", "diagram.flota.wide", "diagram.vllm.narrow"]);
+  expect(Object.keys(svgs).sort()).toEqual(["diagram.bridge.narrow", "diagram.bridge.wide", "diagram.fleets.narrow", "diagram.fleets.wide", "diagram.flota.narrow", "diagram.flota.wide", "diagram.vllm.narrow"]);
   // Under each drawing, the node panel: an entry for every box, with what its ASCII popup says.
   for (const d of WORK_DIAGRAMS) {
     const doc = new DOMParser().parseFromString(all[`diagram.${d.id}.panel`], "text/html");
@@ -84,6 +84,24 @@ describe("the drawings' traffic", () => {
         }
         expect(end).toBeLessThanOrEqual(period);
       }
+  });
+
+  test("a dot between two legs on one side of a box (the spool's top) dips to its centre, out of sight", () => {
+    const d = WORK_DIAGRAMS.find((x) => x.id === "fleets")!;
+    for (const lay of d.layouts) {
+      const spool = lay.boxes.spool;
+      const centre = [spool.x + spool.w / 2, spool.y + spool.h / 2];
+      const l = lanes(lay, ROUTES.fleets).lanes[0];
+      expect(l.route, lay.view).toEqual(["alpha", "spool", "betaCourier", "beta"]);
+      expect(l.path, lay.view).toContainEqual(centre);
+      // Every step of the dot's path off the drawn legs runs inside a box.
+      const inside = (x: number, y: number) => Object.values(lay.boxes).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
+      for (let i = 1; i < l.path.length; i++) {
+        const [a, b] = [l.path[i - 1], l.path[i]];
+        const onLeg = l.legs.some((g) => g.pts.some((p, k) => k > 0 && p[0] === b[0] && p[1] === b[1] && g.pts[k - 1][0] === a[0] && g.pts[k - 1][1] === a[1]));
+        if (!onLeg) expect(inside((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), `${lay.view} ${a} to ${b}`).toBe(true);
+      }
+    }
   });
 
   test("every moving part has its rule, and none of it is a node or an edge (ASCII mode reads those)", () => {

@@ -43,6 +43,8 @@ export interface WLayout {
   edges: WEdge[];
   /** This drawing's own routes for its traffic, where it draws other links than the diagram's ROUTES. */
   routes?: string[][];
+  /** Nodes this drawing leaves out: parts a phone folds into one box, or that box on a wide drawing. */
+  folded?: string[];
 }
 
 export interface WDiagram {
@@ -317,94 +319,172 @@ function flotaNarrow(): WLayout {
 
 // ---------- many fleets: the channel between managers, and MultiAsk ----------
 
-// Each participant (a fleet's manager, or MultiAsk) the same way: its session, and under it, offset to
-// one side, its courier. The session's own line to the spool runs down past the courier on the other
-// side; the courier's two lines share one x, from the spool up into the courier and on into the session.
-type Column = { pm: Box; courier: Box; line: number; ping: number };
-function column(z: number, top: number, pmW: number, courier: Box["x"], courierW: number, gap: number, line: number, ping?: number): Column {
-  const pm = bx(z + 8, top, pmW);
-  const c = bx(z + courier, top + 52 + gap, courierW);
-  return { pm, courier: c, line: z + line, ping: ping === undefined ? cx(c) : z + ping };
+// Each fleet is the drawing above in small: the hook and the fleet's courier over its manager; the
+// sections, the merger and main to the manager's left; the limit guard and the state files under them.
+// Its manager alone reaches the spool, on a line of its own to the right, so no section ever does.
+function fleetWide(p: string, zy: number) {
+  const y1 = zy + 24;
+  const y2 = y1 + 96;
+  const y3 = y2 + 104;
+  const B: Record<string, Box> = {
+    [p]: bx(640, y2, 180),
+    [`${p}Hook`]: bx(640, y1, 96, 44),
+    [`${p}Courier`]: bx(760, y1, 140),
+    [`${p}Sections`]: bx(386, y2, 170),
+    [`${p}Merger`]: bx(184, y2, 130),
+    [`${p}Main`]: bx(32, y2, 80),
+    [`${p}Guard`]: bx(470, y3, 220),
+    [`${p}State`]: bx(150, y3, 260),
+  };
+  const pm = B[p];
+  const state = B[`${p}State`];
+  const under = y3 + 52 + 28;
+  const mid = (y2 + 52 + y3) / 2 + 4;
+  const edges: WEdge[] = [
+    down(B[`${p}Hook`], pm, "delegate only"),
+    down(B[`${p}Courier`], pm, "notice", 790),
+    across(pm, B[`${p}Sections`], "by name", undefined, { both: true }),
+    across(B[`${p}Sections`], B[`${p}Merger`], "branch"),
+    across(B[`${p}Merger`], B[`${p}Main`], "merges"),
+    up(B[`${p}Guard`], pm, "", 680),
+    up(B[`${p}Guard`], B[`${p}Sections`], "PAUSE · HARD · OK", 520, { at: [600, mid], anchor: "middle" }),
+    up(state, B[`${p}Sections`], "", 400, { dashed: true, both: true }),
+    up(state, B[`${p}Merger`], "read · write", 250, { dashed: true, both: true, at: [325, mid], anchor: "middle" }),
+    path([[280, state.y + state.h + GAP], [280, under], [800, under], [800, pm.y + pm.h + GAP]], "", [0, 0], "middle", { dashed: true, both: true }),
+  ];
+  return { B, edges, zone: bx(16, zy, 984, under + 14 - zy) };
 }
 
 function fleetsWide(): WLayout {
-  const zs = [20, 340, 660];
-  const [a, b, m] = zs.map((z) => column(z + 8, 56, 210, 126, 150, 44, 52, 180));
-  const spool = bx(40, 290, 880);
-  const B: Record<string, Box> = {
-    alpha: a.pm, alphaCourier: a.courier, beta: b.pm, betaCourier: b.courier, multiask: m.pm, askCourier: m.courier,
-    spool, owner: bx(1016, 56, 144),
-  };
-  const wire = (c: Column): WEdge[] => [
-    down(c.pm, spool, "send · receive", c.line, { dashed: true, both: true, at: [c.line + 8, 262] }),
-    up(c.courier, c.pm, "notice", c.ping),
-    up(spool, c.courier, "new mail", cx(c.courier), { dashed: true, at: [cx(c.courier) + 8, 262] }),
+  const a = fleetWide("alpha", 16);
+  const b = fleetWide("beta", 342);
+  const zy = 668;
+  const askCourier = bx(760, zy + 24, 140);
+  const multiask = bx(640, zy + 120, 180);
+  const owner = bx(360, zy + 120, 150);
+  const spool = bx(1024, 40, 140, multiask.y + multiask.h - 40);
+  const B: Record<string, Box> = { ...a.B, ...b.B, askCourier, multiask, owner, spool };
+  // Every participant the same way to the spool: its own two-way line, and the spool's line to its courier.
+  const wire = (pm: Box, courier: Box): WEdge[] => [
+    across(pm, spool, "send · receive", undefined, { dashed: true, both: true }),
+    across(spool, courier, "new mail", cy(courier), { dashed: true }),
   ];
   return {
     view: "wide",
     width: 1180,
-    height: 362,
+    height: 872,
     boxes: B,
+    folded: ["betaFleet"],
     zones: [
-      { box: bx(zs[0], 20, 300, 200), title: "FLEET ALPHA", sub: "Linux user alpha" },
-      { box: bx(zs[1], 20, 300, 200), title: "FLEET BETA", sub: "Linux user beta" },
-      { box: bx(zs[2], 20, 300, 200), title: "SUPERVISOR", sub: "the owner's user" },
+      { box: a.zone, title: "FLEET ALPHA", sub: "Linux user alpha" },
+      { box: b.zone, title: "FLEET BETA", sub: "Linux user beta" },
+      { box: bx(16, zy, 984, 188), title: "SUPERVISOR", sub: "the owner's user" },
     ],
-    edges: [...wire(a), ...wire(b), ...wire(m), across(m.pm, B.owner, "asks · answers", undefined, { both: true })],
+    edges: [
+      ...a.edges,
+      ...wire(B.alpha, B.alphaCourier),
+      ...b.edges,
+      ...wire(B.beta, B.betaCourier),
+      down(askCourier, multiask, "notice", 790),
+      across(multiask, owner, "asks · answers", undefined, { both: true }),
+      ...wire(multiask, askCourier),
+    ],
   };
 }
 
 function fleetsNarrow(): WLayout {
-  // The two fleets side by side over the spool, MultiAsk under it the other way up (its courier first),
-  // and the owner under MultiAsk. Only the fleets get a zone: a zone's title would sit on MultiAsk's lines.
-  const [a, b] = [6, 184].map((z) => column(z, 40, 154, 40, 122, 44, 24));
-  const spool = bx(6, 248, 348);
-  const askCourier = bx(131, 344, 142);
-  const multiask = bx(99, 440, 174);
-  const owner = bx(99, 540, 174);
-  const B: Record<string, Box> = { alpha: a.pm, alphaCourier: a.courier, beta: b.pm, betaCourier: b.courier, spool, askCourier, multiask, owner };
-  const wire = (c: Column): WEdge[] => [
-    down(c.pm, spool, "", c.line, { dashed: true, both: true }),
-    up(c.courier, c.pm, "notice", c.ping),
-    up(spool, c.courier, "new mail", c.ping, { dashed: true }),
+  // MultiAsk (under the owner) and fleet beta (folded into one box over its manager) side by side,
+  // each manager with its courier under it; the spool under both; fleet alpha in full under the spool,
+  // as in the drawing above: hook and guard to the left of the column, the courier over the manager.
+  const S: Record<string, Box> = {
+    owner: bx(14, 40, 154), multiask: bx(14, 136, 154), askCourier: bx(46, 232, 122),
+    betaFleet: bx(192, 40, 154), beta: bx(192, 136, 154), betaCourier: bx(224, 232, 122),
+    spool: bx(6, 328, 348),
+  };
+  const z = 420;
+  const A: Record<string, Box> = {
+    alphaCourier: bx(196, z + 10, 152),
+    alpha: bx(154, z + 106, 170),
+    alphaHook: bx(12, z + 100, 96, 44),
+    alphaSections: bx(154, z + 214, 170),
+    alphaGuard: bx(12, z + 214, 114),
+    alphaMerger: bx(154, z + 318, 170),
+    alphaState: bx(12, z + 404, 170),
+    alphaMain: bx(200, z + 426, 120),
+  };
+  const B = { ...S, ...A };
+  const { spool, alpha: pm } = B;
+  const top = (pm: Box, courier: Box, line: number): WEdge[] => [
+    down(pm, spool, "", line, { dashed: true, both: true }),
+    up(courier, pm, "notice", cx(courier)),
+    up(spool, courier, "new mail", cx(courier), { dashed: true }),
   ];
-  const line = 115;
+  const guard = B.alphaGuard;
   return {
     view: "narrow",
     width: 360,
-    height: 604,
+    height: 920,
     boxes: B,
+    folded: ["betaHook", "betaSections", "betaMerger", "betaMain", "betaGuard", "betaState"],
+    routes: [
+      ["alpha", "spool", "betaCourier", "beta"],
+      ["beta", "betaFleet"],
+      ["beta", "spool", "askCourier", "multiask", "owner"],
+      ["owner", "multiask", "spool", "betaCourier", "beta"],
+      ["alpha", "alphaSections", "alphaMerger", "alphaMain"],
+    ],
     zones: [
-      { box: bx(6, 8, 170, 192), title: "FLEET ALPHA", sub: "" },
-      { box: bx(184, 8, 170, 192), title: "FLEET BETA", sub: "" },
+      { box: bx(6, 8, 170, 288), title: "SUPERVISOR", sub: "" },
+      { box: bx(184, 8, 170, 288), title: "FLEET BETA", sub: "" },
+      { box: bx(6, z, 348, 490), title: "FLEET ALPHA", sub: "" },
     ],
     edges: [
-      ...wire(a),
-      ...wire(b),
-      up(multiask, spool, "send · receive", line, { dashed: true, both: true, at: [line - 8, 326], anchor: "end" }),
-      down(spool, askCourier, "new mail", cx(askCourier), { dashed: true }),
-      down(askCourier, multiask, "notice"),
-      down(multiask, owner, "asks · answers", 180, { both: true }),
+      down(B.owner, B.multiask, "asks · answers", 150, { both: true, at: [142, 118], anchor: "end" }),
+      ...top(B.multiask, B.askCourier, 30),
+      up(B.beta, B.betaFleet, "by name", undefined, { both: true }),
+      ...top(B.beta, B.betaCourier, 208),
+      up(pm, spool, "send · receive", 164, { dashed: true, both: true, at: [156, 404], anchor: "end" }),
+      down(spool, B.alphaCourier, "new mail", 300, { dashed: true, at: [292, 404], anchor: "end" }),
+      down(B.alphaCourier, pm, "notice", 250),
+      across(B.alphaHook, pm, ""),
+      path([[120, guard.y], [120, pm.y + 44], [pm.x - GAP, pm.y + 44]], "", [0, 0], "middle"),
+      across(guard, B.alphaSections, ""),
+      down(pm, B.alphaSections, "by name", undefined, { both: true }),
+      down(B.alphaSections, B.alphaMerger, "branch"),
+      down(B.alphaMerger, B.alphaMain, "merges", 262),
+      path([[100, B.alphaState.y - GAP], [100, cy(B.alphaMerger)], [B.alphaMerger.x - GAP, cy(B.alphaMerger)]], "read/write", [92, cy(B.alphaMerger) + 18], "end", { dashed: true, both: true }),
     ],
   };
 }
+
+// One fleet's boxes, named after it: the same parts and words as the drawing above.
+const fleet = (p: "alpha" | "beta", user: string): WNode[] => [
+  { id: p, label: `PM ${p}`, sub: `manages fleet ${p}`, role: "site", tip: p === "alpha" ? "Fleet alpha's manager: it plans and hands out work at home, and is the only one in the fleet on the channel." : "Runs as another Linux user and cannot see alpha's sessions at all: the spool is the one place they meet." },
+  { id: `${p}Hook`, label: "PM hook", sub: "no edits", role: "project", tip: "A tool hook on the manager refuses edits and writes, and says: give it to a section." },
+  { id: `${p}Courier`, label: "Courier", sub: `${p} · no model`, role: "project", tip: p === "alpha" ? "Checks alpha's mailbox every 30 seconds and, when the manager sits idle, types who wants to reach it, never the message." : "Waits while a dialog is open or the owner is typing, and tries again on its next round; it costs no tokens." },
+  { id: `${p}Sections`, label: "Sections", sub: "one tmux window each", role: "site", tip: `Fleet ${p}'s sections, each in its own window with its own scope; they never touch the channel.` },
+  { id: `${p}Merger`, label: "Merger", sub: "only one merges", role: "site", tip: "One session merges, so branches land on main one at a time and in order." },
+  { id: `${p}Main`, label: "main", sub: "branch", role: "path", tip: `Where fleet ${p}'s work ends up, in the project ${user} works on.` },
+  { id: `${p}Guard`, label: "Limit guard", sub: "reads usage", role: "project", tip: `Watches ${user}'s usage limits and types PAUSE, HARD or OK into the fleet's windows, spending no tokens.` },
+  { id: `${p}State`, label: "State files", sub: "orders · decisions", role: "lab", tip: "The fleet's own plain files: open orders, decisions taken, each section's state." },
+];
 
 const FLEETS: WDiagram = {
   id: "fleets",
   title: "Many fleets, one owner",
   desc:
-    "Each fleet's manager may run as another Linux user, so the managers talk through a shared spool: a mailbox per manager " +
-    "and a registry of who is who. A manager sends with flota channel send; the receiving fleet's courier, which runs no " +
-    "model, sees the new mail and, only while its manager is idle, types a one-line notice into the manager's window; the " +
-    "manager then reads the message itself. MultiAsk is one more participant with its own courier: every fleet's questions " +
-    "to the owner land there, the owner answers in one place, and each answer goes back over the channel to the manager that asked.",
+    "Two fleets, each the whole of the drawing above: a manager with its hook, sections, a merger to main, a limit guard and " +
+    "state files, under Linux users of their own. Only the managers reach the channel: a shared spool with a mailbox per " +
+    "manager and a registry of who is who. A manager sends with flota channel send; the receiving fleet's courier, which " +
+    "runs no model, sees the new mail and, only while its manager is idle, types a one-line notice into the manager's window; " +
+    "the manager then reads the message itself. MultiAsk is one more participant with its own courier: every fleet's " +
+    "questions to the owner land there, the owner answers in one place, and each answer goes back to the manager that asked.",
   nodes: [
-    { id: "alpha", label: "PM alpha", sub: "manages fleet alpha", role: "site", tip: "Fleet alpha's manager: it plans and hands out work at home, and reaches other fleets only through the channel." },
-    { id: "alphaCourier", label: "Courier", sub: "alpha · no model", role: "project", tip: "Checks alpha's mailbox every 30 seconds and, when the manager sits idle, types who wants to reach it, never the message." },
-    { id: "beta", label: "PM beta", sub: "manages fleet beta", role: "site", tip: "Runs as another Linux user and cannot see alpha's sessions at all: the spool is the one place they meet." },
-    { id: "betaCourier", label: "Courier", sub: "beta · no model", role: "project", tip: "Waits while a dialog is open or the owner is typing, and tries again on its next round; it costs no tokens." },
-    { id: "spool", label: "Channel spool", sub: "a mailbox per PM · who is who", role: "lab", tip: "A shared directory: a mailbox per manager, a slot in it only the sender's account can write to, and a registry of who is who." },
-    { id: "askCourier", label: "Courier", sub: "MultiAsk · no model", role: "project", tip: "MultiAsk is one more participant, with a courier of its own that tells it a question has come in." },
+    ...fleet("alpha", "user alpha"),
+    ...fleet("beta", "user beta"),
+    { id: "betaFleet", label: "Beta's fleet", sub: "same shape as alpha's", role: "site", tip: "Folded on a phone: fleet beta has the same hook, sections, merger, limit guard and state files as alpha." },
+    { id: "spool", label: "Channel spool", sub: "a mailbox per PM", role: "lab", tip: "A shared directory: a mailbox per manager, a slot in it only the sender's account can write to, and a registry of who is who." },
+    { id: "askCourier", label: "Courier", sub: "no model", role: "project", tip: "MultiAsk is one more participant, with a courier of its own that tells it a question has come in." },
     { id: "multiask", label: "MultiAsk", sub: "every PM's questions", role: "site", tip: "One session where every fleet's questions to the owner land; it asks them in one place and sends each answer back." },
     { id: "owner", label: "Owner", sub: "you, in one window", role: "path", tip: "You answer every fleet's questions from one window, and each answer goes back to the manager that asked." },
   ],
@@ -469,11 +549,14 @@ export const ROUTES: Record<WDiagram["id"], string[][]> = {
     ["guard", "sections"],
     ["sections", "state"],
   ],
-  // A message from alpha to beta; beta's question to the owner through MultiAsk; the answer back.
+  // A message from alpha to beta, beta's sections at work, beta's question to the owner through MultiAsk,
+  // the answer back, and alpha's guard on its sections.
   fleets: [
     ["alpha", "spool", "betaCourier", "beta"],
+    ["beta", "betaSections", "betaMerger", "betaMain"],
     ["beta", "spool", "askCourier", "multiask", "owner"],
     ["owner", "multiask", "spool", "betaCourier", "beta"],
+    ["alphaGuard", "alphaSections"],
   ],
 };
 /** Units a dot covers per second, the shortest run and the rest before the next route starts. */
@@ -622,7 +705,7 @@ export function workSvg(d: WDiagram, view: WLayout["view"], only = false): strin
     ...zones,
     ...lay.edges.map((e) => edgeMarkup(e, marker)),
     ...trafficMarkup(d, lay),
-    ...d.nodes.map((n) => nodeMarkup(n, lay.boxes[n.id])),
+    ...d.nodes.filter((n) => lay.boxes[n.id]).map((n) => nodeMarkup(n, lay.boxes[n.id])),
   );
 }
 

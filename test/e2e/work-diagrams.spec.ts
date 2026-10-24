@@ -12,7 +12,7 @@ const PAGES: { path: string; id: string; open?: boolean; first: string; tip: str
   { path: "/work/bridge/", id: "bridge", first: "Webhook", tip: "Only signed deliveries count" },
   { path: "/work/flota/", id: "flota", first: "Merger", tip: "One session merges" },
   // The same page's second drawing: many fleets' managers on the channel, and MultiAsk.
-  { path: "/work/flota/", id: "fleets", first: "MultiAsk", tip: "One session where every fleet's" },
+  { path: "/work/flota/", id: "fleets", first: "Channel", tip: "A shared directory" },
 ];
 
 const openAbout = async (page: Page) => {
@@ -109,16 +109,19 @@ for (const p of PAGES) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     if (test.info().project.name !== "desktop") return;
     await dg.evaluate((pre) => pre.scrollIntoView({ block: "center", behavior: "instant" }));
-    const at = await dg.evaluate((pre, word) => {
-      const lines = (pre.textContent ?? "").split("\n");
-      const r = lines.findIndex((l) => l.includes(word));
-      const c = lines[r].indexOf(word) + 2;
-      const rect = pre.getBoundingClientRect();
-      return { x: rect.left + ((c + 0.5) / [...lines[0]].length) * rect.width, y: rect.top + ((r + 0.5) / (lines.length - 1)) * rect.height };
-    }, p.first);
-    await page.mouse.move(at.x, at.y);
     const tip = page.locator(".ascii-tip:not([hidden])");
-    await expect(tip).toContainText(p.tip);
+    // Measured again on each try: a tall drawing may still refit its characters once it is on screen.
+    await expect(async () => {
+      const at = await dg.evaluate((pre, word) => {
+        const lines = (pre.textContent ?? "").split("\n");
+        const r = lines.findIndex((l) => l.includes(word));
+        const c = lines[r].indexOf(word) + 2;
+        const rect = pre.getBoundingClientRect();
+        return { x: rect.left + ((c + 0.5) / [...lines[0]].length) * rect.width, y: rect.top + ((r + 0.5) / (lines.length - 1)) * rect.height };
+      }, p.first);
+      await page.mouse.move(at.x, at.y);
+      await expect(tip).toContainText(p.tip, { timeout: 1000 });
+    }).toPass({ timeout: 8000 });
     // Seen, not just present: a modal dialog (the About drawer) sits above the page, so a popup for a
     // drawing in it has to be in it too.
     expect(await tip.evaluate((t) => !document.querySelector("dialog[open]") || !!t.closest("dialog[open]"))).toBe(true);
@@ -182,7 +185,7 @@ for (const p of PAGES) {
     const still = () => page.evaluate(() => [document.documentElement.scrollHeight, Math.round(scrollY), document.querySelector(".vd-drawer .vd-dialog__body")?.scrollHeight ?? 0, Math.round(document.querySelector(".vd-drawer .vd-dialog__body")?.scrollTop ?? 0)]);
     // Focus as Tab would, without the browser scrolling the box into view: the panel is what is measured.
     const focus = (id: string) => node(id).evaluate((el) => (el as SVGElement).focus({ preventScroll: true }));
-    const id = (await node(p.first.toLowerCase()).count()) ? p.first.toLowerCase() : ({ Webhook: "webhook", Merger: "merger", Gateway: "gateway" } as Record<string, string>)[p.first];
+    const id = (await node(p.first.toLowerCase()).count()) ? p.first.toLowerCase() : ({ Webhook: "webhook", Merger: "merger", Gateway: "gateway", Channel: "spool" } as Record<string, string>)[p.first];
     const at0 = await still();
     await expect(panel).toHaveAttribute("data-open", "false");
     await expect(node(id)).toHaveAttribute("role", "button");

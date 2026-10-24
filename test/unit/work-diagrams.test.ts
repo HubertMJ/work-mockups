@@ -5,11 +5,14 @@ import { lanes, ROUTES, trafficCss, WORK_DIAGRAMS, workSvgs } from "../../src/di
 // The measured rules (words inside boxes, lines clear of boxes and labels) are in test/e2e/work-diagrams.spec.ts.
 
 describe.each(WORK_DIAGRAMS.map((d) => [d.id, d] as const))("the %s drawing", (_, d) => {
-  test("every node has a box in every layout, inside the drawing, and a sentence for its popup", () => {
+  test("every node has a box in every layout that does not fold it, inside the drawing, and a sentence for its popup", () => {
+    for (const n of d.nodes) expect(d.layouts.some((l) => l.boxes[n.id]), n.id).toBe(true);
     for (const n of d.nodes) expect(n.tip.length, n.id).toBeGreaterThan(20);
     expect(new Set(d.nodes.map((n) => n.id)).size).toBe(d.nodes.length);
     for (const l of d.layouts) {
-      expect(Object.keys(l.boxes).sort()).toEqual(d.nodes.map((n) => n.id).sort());
+      // A drawing may fold some parts into one box (fleet beta on a phone); each node is drawn somewhere.
+      for (const id of l.folded ?? []) expect(d.nodes.map((n) => n.id), `${l.view} folds ${id}`).toContain(id);
+      expect(Object.keys(l.boxes).sort()).toEqual(d.nodes.map((n) => n.id).filter((id) => !l.folded?.includes(id)).sort());
       for (const [id, b] of Object.entries(l.boxes)) expect(b.x >= 0 && b.y >= 0 && b.x + b.w <= l.width && b.y + b.h <= l.height, `${l.view} ${id}`).toBe(true);
     }
   });
@@ -86,14 +89,14 @@ describe("the drawings' traffic", () => {
       }
   });
 
-  test("a dot between two legs on one side of a box (the spool's top) dips to its centre, out of sight", () => {
+  test("a dot between two legs on one side of a box (the spool's, on the wide drawing) dips to its centre, out of sight", () => {
     const d = WORK_DIAGRAMS.find((x) => x.id === "fleets")!;
     for (const lay of d.layouts) {
       const spool = lay.boxes.spool;
       const centre = [spool.x + spool.w / 2, spool.y + spool.h / 2];
       const l = lanes(lay, ROUTES.fleets).lanes[0];
       expect(l.route, lay.view).toEqual(["alpha", "spool", "betaCourier", "beta"]);
-      expect(l.path, lay.view).toContainEqual(centre);
+      if (lay.view === "wide") expect(l.path).toContainEqual(centre);
       // Every step of the dot's path off the drawn legs runs inside a box.
       const inside = (x: number, y: number) => Object.values(lay.boxes).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h);
       for (let i = 1; i < l.path.length; i++) {
